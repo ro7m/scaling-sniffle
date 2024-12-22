@@ -25,24 +25,26 @@ jobs:
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
 
-      - name: Create local.properties
-        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
-      
-      - name: Make Gradlew Executable
-        run: chmod +x android/gradlew
-        
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.0'
           channel: 'stable'
           cache: true
-          
-      - name: Clean Gradle
-        run: cd android && ./gradlew clean
+
+      - name: Create local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+          echo "flutter.sdk=$FLUTTER_HOME" >> android/local.properties
+      
+      - name: Make Gradlew Executable
+        run: chmod +x android/gradlew
           
       - name: Get dependencies
         run: flutter pub get
+        
+      - name: Clean Gradle
+        run: cd android && ./gradlew clean
         
       - name: Build APK
         run: flutter build apk --release
