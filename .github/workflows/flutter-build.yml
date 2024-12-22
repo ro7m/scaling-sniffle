@@ -31,7 +31,7 @@ jobs:
         export ANDROID_HOME=/usr/lib/android-sdk
         export PATH=${ANDROID_HOME}/cmdline-tools/cmdline-tools/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/platform-tools:$PATH
         yes | sdkmanager --licenses
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0"
+        sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
     - name: Flutter doctor
       run: flutter doctor
