@@ -1,49 +1,48 @@
-name: Flutter Build
+name: Flutter Android Build
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
-    name: Build Flutter App
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.27.1'
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
 
-    - name: Install Android SDK
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y openjdk-11-jdk
-        echo "Installing Android SDK..."
-        sudo mkdir -p /usr/lib/android-sdk/cmdline-tools
-        curl -o commandlinetools.zip https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
-        sudo unzip commandlinetools.zip -d /usr/lib/android-sdk/cmdline-tools/
-        export ANDROID_HOME=/usr/lib/android-sdk
-        export PATH=${ANDROID_HOME}/cmdline-tools/cmdline-tools/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/platform-tools:$PATH
-        yes | sdkmanager --licenses
-        sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2
 
-    - name: Flutter doctor
-      run: flutter doctor
-
-    - name: Install Dependencies
-      run: flutter pub get
-
-    - name: Build APK
-      run: flutter build apk --release
-
-    - name: Upload APK to Artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: app-release
-        path: build/app/outputs/flutter-apk/wuai-trax.apk
+      - name: Make Gradlew Executable
+        run: chmod +x android/gradlew
+        
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+          channel: 'stable'
+          cache: true
+          
+      - name: Clean Gradle
+        run: cd android && ./gradlew clean
+          
+      - name: Get dependencies
+        run: flutter pub get
+        
+      - name: Build APK
+        run: flutter build apk --release
+        
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
