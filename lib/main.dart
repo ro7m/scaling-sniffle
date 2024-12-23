@@ -3,9 +3,19 @@ import 'package:camera/camera.dart';
 import 'screens/camera_screen.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  final cameras = await availableCameras();
-  runApp(MyApp(cameras: cameras));
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
+    final cameras = await availableCameras();
+    if (cameras.isEmpty) {
+      print('No cameras found');
+      runApp(const MyAppError(error: 'No cameras available'));
+    } else {
+      runApp(MyApp(cameras: cameras));
+    }
+  } catch (e) {
+    print('Error initializing app: $e');
+    runApp(MyAppError(error: e.toString()));
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -21,6 +31,23 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
       ),
       home: CameraScreen(cameras: cameras),
+    );
+  }
+}
+
+class MyAppError extends StatelessWidget {
+  final String error;
+
+  const MyAppError({Key? key, required this.error}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Text('Error: $error'),
+        ),
+      ),
     );
   }
 }
