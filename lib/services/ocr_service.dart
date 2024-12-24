@@ -28,7 +28,7 @@ class OCRService {
       final appDir = await getApplicationDocumentsDirectory();
       
       // Create OrtEnv
-      env = OrtEnv(identifier: 'ocr_env');
+      env = OrtEnv();
       
       // Load detection model
       final detectionFile = File('${appDir.path}/assets/models/rep_fast_base.onnx');
@@ -294,70 +294,6 @@ class OCRService {
     final exp_values = input.map((x) => exp(x - maxVal)).toList();
     final sumExp = exp_values.reduce((a, b) => a + b);
     return exp_values.map((x) => x / sumExp).toList();
-  }
-
-  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
-    final imgWidth = OCRConstants.TARGET_SIZE[0];
-    final imgHeight = OCRConstants.TARGET_SIZE[1];
-    
-    try {
-      final byteData = Float32List.fromList(probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList())
-          .buffer.asUint8List();
-      
-      final matrix = await ImgProc.threshold(
-        byteData,
-        imgWidth,
-        imgHeight,
-        77,
-        255,
-        ImgProc.threshBinary,
-      );
-
-      final kernel = await ImgProc.getStructuringElement(
-        ImgProc.morphRect,
-        [2, 2],
-      );
-      
-      final opened = await ImgProc.morphologyEx(
-        matrix,
-        ImgProc.morphOpen,
-        kernel,
-        iterations: 1,
-      );
-
-      final contours = await ImgProc.findContours(
-        opened,
-        ImgProc.retrExternal,
-        ImgProc.chainApproxSimple,
-      );
-
-      List<BoundingBox> boundingBoxes = [];
-      
-      for (final contour in contours) {
-        try {
-          final rect = await ImgProc.boundingRect(contour);
-          
-          if (rect[2] > 2 && rect[3] > 2) {
-            final box = _transformBoundingBox(
-              rect[0].toDouble(),
-              rect[1].toDouble(),
-              rect[2].toDouble(),
-              rect[3].toDouble(),
-              imgWidth.toDouble(),
-              imgHeight.toDouble(),
-            );
-            boundingBoxes.add(box);
-          }
-        } catch (e) {
-          print('Error processing contour: $e');
-          continue;
-        }
-      }
-
-      return boundingBoxes;
-    } catch (e) {
-      throw Exception('Error extracting bounding boxes: $e');
-    }
   }
 
   Future<List<ui.Image>> cropImages(ui.Image sourceImage, List<BoundingBox> boxes) async {
