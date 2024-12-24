@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../services/ocr_service.dart';
+import '../widget/bounding_box_painter.dart';
 
 class PreviewScreen extends StatefulWidget {
   final String imagePath;
