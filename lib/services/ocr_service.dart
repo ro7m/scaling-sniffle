@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 import 'package:opencv_dart/opencv_dart.dart' as cv;
 import '../models/bounding_box.dart';
-import '../constants.dart'
+import '../constants.dart';
 
 class OCRResult {
   final String text;
