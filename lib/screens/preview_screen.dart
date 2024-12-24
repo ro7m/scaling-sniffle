@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../services/ocr_service.dart';
 
@@ -12,24 +13,53 @@ class PreviewScreen extends StatefulWidget {
 }
 
 class PreviewScreenState extends State<PreviewScreen> {
-  late Future<String> _extractedText;
   final OCRService _ocrService = OCRService();
+  late Future<void> _modelLoadingFuture;
+  List<OCRResult> _results = [];
+  bool _isProcessing = false;
+  String _error = '';
 
   @override
   void initState() {
     super.initState();
-    _extractedText = _ocrService.extractText(widget.imagePath);
+    _modelLoadingFuture = _ocrService.loadModels();
+    _processImage();
   }
 
-  void _retryOCR() {
+  Future<void> _processImage() async {
     setState(() {
-      _extractedText = _ocrService.extractText(widget.imagePath);
+      _isProcessing = true;
+      _error = '';
     });
+
+    try {
+      await _modelLoadingFuture;
+      
+      final bytes = await File(widget.imagePath).readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frameInfo = await codec.getNextFrame();
+      final image = frameInfo.image;
+
+      final results = await _ocrService.processImage(image);
+      
+      setState(() {
+        _results = results;
+        _isProcessing = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Error processing image: $e';
+        _isProcessing = false;
+      });
+    }
   }
 
-  void _acceptResult() {
-    // Handle the accepted result (e.g., save to database, navigate back, etc.)
-    Navigator.of(context).pop();
+  void _handleRetry() {
+    Navigator.of(context).pop(_results);
+  }
+
+  void _handleAccept() {
+    Navigator.of(context).pop(_results);
   }
 
   @override
@@ -40,55 +70,84 @@ class PreviewScreenState extends State<PreviewScreen> {
         children: [
           Expanded(
             flex: 1,
-            child: Image.file(
-              File(widget.imagePath),
-              fit: BoxFit.contain,
+            child: Stack(
+              children: [
+                Image.file(
+                  File(widget.imagePath),
+                  fit: BoxFit.contain,
+                ),
+                CustomPaint(
+                  painter: BoundingBoxPainter(_results),
+                  size: Size.infinite,
+                ),
+              ],
             ),
           ),
           Expanded(
             flex: 1,
             child: Padding(
               padding: const EdgeInsets.all(16.0),
-              child: FutureBuilder<String>(
-                future: _extractedText,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  } else if (snapshot.hasError) {
-                    return Center(child: Text('Error: ${snapshot.error}'));
-                  } else {
-                    return Column(
-                      children: [
-                        Expanded(
-                          child: SingleChildScrollView(
-                            child: Text(
-                              snapshot.data ?? 'No text extracted',
-                              style: const TextStyle(fontSize: 18),
-                            ),
-                          ),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            ElevatedButton(
-                              onPressed: _retryOCR,
-                              child: const Text('Retry'),
-                            ),
-                            ElevatedButton(
-                              onPressed: _acceptResult,
-                              child: const Text('Accept'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    );
-                  }
-                },
-              ),
+              child: _buildResultsWidget(),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildResultsWidget() {
+    if (_isProcessing) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (_error.isNotEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_error, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _handleRetry,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            itemCount: _results.length,
+            itemBuilder: (context, index) {
+              return ListTile(
+                title: Text(_results[index].text),
+                subtitle: Text(
+                  'Box: (${_results[index].boundingBox.x.toStringAsFixed(1)}, '
+                  '${_results[index].boundingBox.y.toStringAsFixed(1)})',
+                ),
+              );
+            },
+          ),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            ElevatedButton(
+              onPressed: _handleRetry,
+              child: const Text('Retry'),
+            ),
+            ElevatedButton(
+              onPressed: _handleAccept,
+              child: const Text('Accept'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
