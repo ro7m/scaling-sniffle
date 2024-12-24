@@ -67,8 +67,7 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-     - models/crnn_mobilenet_v3_large.onnx
-     - models/rep_fast_base.onnx
+     - assets/models/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

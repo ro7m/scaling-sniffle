@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:math' show exp, max;
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img_lib;
 import 'package:path_provider/path_provider.dart';
@@ -23,31 +24,28 @@ class OCRService {
   
   Future<void> loadModels() async {
     try {
+      // Get the application documents directory
       final appDir = await getApplicationDocumentsDirectory();
       
-      // Create OrtEnv with a name
-      env = OrtEnv(name: 'ocr_env');
-      
-      // Configure session options
-      final sessionOptions = OrtSessionOptions()
-        ..setIntraOpNumThreads(1)
-        ..setInterOpNumThreads(1)
-        ..setExecutionMode(ExecutionMode.sequential);
+      // Create OrtEnv
+      env = OrtEnv(identifier: 'ocr_env');
       
       // Load detection model
-      final detectionPath = '${appDir.path}/models/rep_fast_base.onnx';
-      detectionModel = await OrtSession.fromFile(
-        env: env,
-        path: detectionPath,
-        sessionOptions: sessionOptions,
+      final detectionFile = File('${appDir.path}/assets/models/rep_fast_base.onnx');
+      detectionModel = OrtSession.fromFile(
+        detectionFile,
+        OrtSessionOptions()
+          ..setIntraOpNumThreads(1)
+          ..setInterOpNumThreads(1),
       );
       
       // Load recognition model
-      final recognitionPath = '${appDir.path}/models/crnn_mobilenet_v3_large.onnx';
-      recognitionModel = await OrtSession.fromFile(
-        env: env,
-        path: recognitionPath,
-        sessionOptions: sessionOptions,
+      final recognitionFile = File('${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx');
+      recognitionModel = OrtSession.fromFile(
+        recognitionFile,
+        OrtSessionOptions()
+          ..setIntraOpNumThreads(1)
+          ..setInterOpNumThreads(1),
       );
       
       if (detectionModel == null || recognitionModel == null) {
@@ -66,7 +64,7 @@ class OCRService {
       return img_lib.Image.fromBytes(
         width: image.width,
         height: image.height,
-        bytes: byteData.buffer.asUint8List(),
+        bytes: byteData.buffer,
         numChannels: 4,
       );
     } catch (e) {
@@ -91,12 +89,13 @@ class OCRService {
         final pixel = resized.getPixel(x, y);
         final int idx = y * resized.width + x;
         
+        // Use correct color channel extraction methods
         preprocessedData[idx] = 
-            (img_lib.getRed(pixel) / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
+            ((pixel >> 16 & 0xFF) / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
         preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1]] = 
-            (img_lib.getGreen(pixel) / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
+            ((pixel >> 8 & 0xFF) / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
         preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 2] = 
-            (img_lib.getBlue(pixel) / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
+            ((pixel & 0xFF) / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
       }
     }
     
@@ -109,17 +108,16 @@ class OCRService {
     try {
       final inputTensor = await preprocessImageForDetection(image);
       
-      final feeds = {
-        'input': OrtValueTensor.createTensor(
-          inputTensor,
-          [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
-        )
-      };
+      // Create input tensor using OrtValueTensor constructor
+      final inputOrtTensor = OrtValueTensor.fromList(
+        inputTensor,
+        [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
+      );
 
+      final feeds = {'input': inputOrtTensor};
       final results = await detectionModel!.run(feeds);
-      final probMap = results.values.first.data as Float32List;
+      final probMap = results.values.first.value as Float32List;
       
-      // Apply sigmoid
       final processedProbMap = Float32List.fromList(
         probMap.map((x) => 1.0 / (1.0 + exp(-x))).toList()
       );
@@ -130,6 +128,63 @@ class OCRService {
       };
     } catch (e) {
       throw Exception('Error running detection model: $e');
+    }
+  }
+
+  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
+    final imgWidth = OCRConstants.TARGET_SIZE[0];
+    final imgHeight = OCRConstants.TARGET_SIZE[1];
+    
+    try {
+      // Convert probability map to OpenCV Mat
+      final mat = cv.Mat.fromArray(
+        probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList(),
+        cv.CV_8UC1,
+        imgHeight,
+        imgWidth,
+      );
+      
+      // Apply threshold
+      final thresholdMat = cv.Mat();
+      cv.threshold(mat, thresholdMat, 77, 255, cv.THRESH_BINARY);
+      
+      // Find contours
+      final contours = <cv.Point>[];
+      final hierarchy = cv.Mat();
+      cv.findContours(
+        thresholdMat,
+        contours,
+        hierarchy,
+        cv.RETR_EXTERNAL,
+        cv.CHAIN_APPROX_SIMPLE,
+      );
+
+      List<BoundingBox> boundingBoxes = [];
+      
+      for (final contour in contours) {
+        final rect = cv.boundingRect(contour);
+        
+        if (rect.width > 2 && rect.height > 2) {
+          final box = _transformBoundingBox(
+            rect.x.toDouble(),
+            rect.y.toDouble(),
+            rect.width.toDouble(),
+            rect.height.toDouble(),
+            imgWidth.toDouble(),
+            imgHeight.toDouble(),
+          );
+          boundingBoxes.add(box);
+        }
+      }
+
+      // Clean up OpenCV resources
+      mat.release();
+      thresholdMat.release();
+      hierarchy.release();
+
+      return boundingBoxes;
+    } catch (e) {
+      throw Exception('Error extracting bounding boxes: $e');
     }
   }
 
