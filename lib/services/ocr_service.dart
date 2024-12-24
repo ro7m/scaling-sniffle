@@ -22,35 +22,37 @@ class OCRService {
   OrtSession? recognitionModel;
   late OrtEnv env;
   
+  import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'dart:math' show exp, max;
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img_lib;
+import 'package:path_provider/path_provider.dart';
+import 'package:onnxruntime/onnxruntime.dart';
+import 'package:opencv_dart/opencv_dart.dart' as cv;
+
+class OCRService {
+  OrtSession? detectionModel;
+  OrtSession? recognitionModel;
+  
   Future<void> loadModels() async {
     try {
-      // Get the application documents directory
       final appDir = await getApplicationDocumentsDirectory();
       
-      // Create OrtEnv
-      env = OrtEnv();
+      // Initialize ONNX Runtime
+      final options = OrtSessionOptions();
+      options.setIntraOpNumThreads(1);
+      options.setInterOpNumThreads(1);
       
       // Load detection model
       final detectionFile = File('${appDir.path}/assets/models/rep_fast_base.onnx');
-      detectionModel = OrtSession.fromFile(
-        detectionFile,
-        OrtSessionOptions()
-          ..setIntraOpNumThreads(1)
-          ..setInterOpNumThreads(1),
-      );
+      detectionModel = await OrtSession.fromFile(detectionFile, options);
       
       // Load recognition model
       final recognitionFile = File('${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx');
-      recognitionModel = OrtSession.fromFile(
-        recognitionFile,
-        OrtSessionOptions()
-          ..setIntraOpNumThreads(1)
-          ..setInterOpNumThreads(1),
-      );
+      recognitionModel = await OrtSession.fromFile(recognitionFile, options);
       
-      if (detectionModel == null || recognitionModel == null) {
-        throw Exception('Failed to load ONNX models');
-      }
     } catch (e) {
       throw Exception('Error loading models: $e');
     }
@@ -72,49 +74,49 @@ class OCRService {
     }
   }
 
-  Future<Float32List> preprocessImageForDetection(ui.Image image) async {
-    final img_lib.Image? processedImage = await uiImageToImage(image);
-    if (processedImage == null) throw Exception('Failed to process image');
+    Future<Float32List> preprocessImageForDetection(ui.Image image) async {
+    final img = await uiImageToImage(image);
+    if (img == null) throw Exception('Failed to process image');
 
     final resized = img_lib.copyResize(
-      processedImage,
+      img,
       width: OCRConstants.TARGET_SIZE[0],
       height: OCRConstants.TARGET_SIZE[1],
     );
 
-    final Float32List preprocessedData = Float32List(OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 3);
+    final preprocessedData = Float32List(OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 3);
     
     for (int y = 0; y < resized.height; y++) {
       for (int x = 0; x < resized.width; x++) {
-        final pixel = resized.getPixel(x, y);
-        final int idx = y * resized.width + x;
+        final color = img_lib.getColor(resized, x, y);
+        final idx = y * resized.width + x;
         
-        // Use correct color channel extraction methods
         preprocessedData[idx] = 
-            ((pixel >> 16 & 0xFF) / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
+            (color.r / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
         preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1]] = 
-            ((pixel >> 8 & 0xFF) / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
+            (color.g / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
         preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 2] = 
-            ((pixel & 0xFF) / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
+            (color.b / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
       }
     }
     
     return preprocessedData;
   }
 
-  Future<Map<String, dynamic>> detectText(ui.Image image) async {
+    Future<Map<String, dynamic>> detectText(ui.Image image) async {
     if (detectionModel == null) throw Exception('Detection model not loaded');
     
     try {
       final inputTensor = await preprocessImageForDetection(image);
       
-      // Create input tensor using OrtValueTensor constructor
-      final inputOrtTensor = OrtValueTensor.fromList(
+      // Create ONNX tensor
+      final tensor = OrtTensor.fromList(
+        TensorElementType.float,
         inputTensor,
-        [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
+        [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
       );
 
-      final feeds = {'input': inputOrtTensor};
+      final feeds = {'input': tensor};
       final results = await detectionModel!.run(feeds);
       final probMap = results.values.first.value as Float32List;
       
@@ -136,50 +138,36 @@ class OCRService {
     final imgHeight = OCRConstants.TARGET_SIZE[1];
     
     try {
-      // Convert probability map to OpenCV Mat
-      final mat = cv.Mat.fromArray(
-        probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList(),
-        cv.CV_8UC1,
-        imgHeight,
-        imgWidth,
-      );
-      
+      // Convert to OpenCV matrix
+      final matData = probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList();
+      final mat = cv.Mat.create(imgHeight, imgWidth, cv.CV_8UC1);
+      mat.data = matData;
+
       // Apply threshold
-      final thresholdMat = cv.Mat();
-      cv.threshold(mat, thresholdMat, 77, 255, cv.THRESH_BINARY);
+      final binary = cv.Mat.create(imgHeight, imgWidth, cv.CV_8UC1);
+      cv.threshold(mat, binary, 77, 255, cv.THRESH_BINARY);
       
       // Find contours
-      final contours = <cv.Point>[];
-      final hierarchy = cv.Mat();
-      cv.findContours(
-        thresholdMat,
-        contours,
-        hierarchy,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_SIMPLE,
-      );
+      final List<List<cv.Point>> contours = [];
+      final hierarchy = cv.Mat.create(1, 1, cv.CV_32SC4);
+      cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-      List<BoundingBox> boundingBoxes = [];
+      final boundingBoxes = <BoundingBox>[];
       
       for (final contour in contours) {
         final rect = cv.boundingRect(contour);
-        
         if (rect.width > 2 && rect.height > 2) {
-          final box = _transformBoundingBox(
-            rect.x.toDouble(),
-            rect.y.toDouble(),
-            rect.width.toDouble(),
-            rect.height.toDouble(),
-            imgWidth.toDouble(),
-            imgHeight.toDouble(),
-          );
-          boundingBoxes.add(box);
+          boundingBoxes.add(BoundingBox(
+            x: rect.x.toDouble(),
+            y: rect.y.toDouble(),
+            width: rect.width.toDouble(),
+            height: rect.height.toDouble(),
+          ));
         }
       }
 
-      // Clean up OpenCV resources
       mat.release();
-      thresholdMat.release();
+      binary.release();
       hierarchy.release();
 
       return boundingBoxes;
