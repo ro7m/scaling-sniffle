@@ -3,9 +3,19 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter_onnx_runtime/flutter_onnx_runtime.dart';
+import 'package:onnxruntime/onnxruntime.dart';
+import 'package:opencv/opencv.dart';
 import '../constants.dart';
 import '../models/bounding_box.dart';
+
+
+class OCRResult{
+  final String text;
+  final BoundingBox boundingBox;
+
+  OCRResult({required this.text, required this.boundingBox});
+
+}
 
 class OCRService {
   late OrtSession detectionModel;
