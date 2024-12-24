@@ -7,8 +7,6 @@ import 'package:image/image.dart' as img_lib;
 import 'package:path_provider/path_provider.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 import 'package:opencv_dart/opencv_dart.dart' as cv;
-import '../constants.dart';
-import '../models/bounding_box.dart';
 
 class OCRResult {
   final String text;
@@ -17,20 +15,6 @@ class OCRResult {
   OCRResult({required this.text, required this.boundingBox});
 }
 
-class OCRService {
-  OrtSession? detectionModel;
-  OrtSession? recognitionModel;
-  late OrtEnv env;
-  
-  import 'dart:typed_data';
-import 'dart:ui' as ui;
-import 'dart:math' show exp, max;
-import 'dart:io';
-import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img_lib;
-import 'package:path_provider/path_provider.dart';
-import 'package:onnxruntime/onnxruntime.dart';
-import 'package:opencv_dart/opencv_dart.dart' as cv;
 
 class OCRService {
   OrtSession? detectionModel;
