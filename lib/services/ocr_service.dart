@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img_lib;
 import 'package:path_provider/path_provider.dart';
 import 'package:onnxruntime/onnxruntime.dart';
-import 'package:opencv_4/opencv_4.dart';
+import 'package:opencv_dart/opencv_dart.dart' as cv;
 import '../constants.dart';
 import '../models/bounding_box.dart';
 
