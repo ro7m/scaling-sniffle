@@ -1,14 +1,13 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:math' show exp, max;
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img_lib;
 import 'package:path_provider/path_provider.dart';
 import 'package:onnxruntime/onnxruntime.dart';
-import 'package:opencv_dart/opencv_dart.dart' as cv;
-import '../models/bounding_box.dart';
+import 'package:opencv/core.dart' show ImgProc;
 import '../constants.dart';
+import '../models/bounding_box.dart';
 
 class OCRResult {
   final String text;
@@ -124,43 +123,64 @@ class OCRService {
     final imgHeight = OCRConstants.TARGET_SIZE[1];
     
     try {
-      // Convert to OpenCV matrix
-      final matData = probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList();
-      final mat = cv.Mat.create(imgHeight, imgWidth, cv.CV_8UC1);
-      mat.data = matData;
-
-      // Apply threshold
-      final binary = cv.Mat.create(imgHeight, imgWidth, cv.CV_8UC1);
-      cv.threshold(mat, binary, 77, 255, cv.THRESH_BINARY);
+      final byteData = Float32List.fromList(probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList())
+          .buffer.asUint8List();
       
-      // Find contours
-      final List<List<cv.Point>> contours = [];
-      final hierarchy = cv.Mat.create(1, 1, cv.CV_32SC4);
-      cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+      final matrix = await ImgProc.threshold(
+        byteData,
+        imgWidth,
+        imgHeight,
+        77,
+        255,
+        ImgProc.threshBinary,
+      );
 
-      final boundingBoxes = <BoundingBox>[];
+      final kernel = await ImgProc.getStructuringElement(
+        ImgProc.morphRect,
+        [2, 2],
+      );
+      
+      final opened = await ImgProc.morphologyEx(
+        matrix,
+        ImgProc.morphOpen,
+        kernel,
+        iterations: 1,
+      );
+
+      final contours = await ImgProc.findContours(
+        opened,
+        ImgProc.retrExternal,
+        ImgProc.chainApproxSimple,
+      );
+
+      List<BoundingBox> boundingBoxes = [];
       
       for (final contour in contours) {
-        final rect = cv.boundingRect(contour);
-        if (rect.width > 2 && rect.height > 2) {
-          boundingBoxes.add(BoundingBox(
-            x: rect.x.toDouble(),
-            y: rect.y.toDouble(),
-            width: rect.width.toDouble(),
-            height: rect.height.toDouble(),
-          ));
+        try {
+          final rect = await ImgProc.boundingRect(contour);
+          
+          if (rect[2] > 2 && rect[3] > 2) {
+            final box = _transformBoundingBox(
+              rect[0].toDouble(),
+              rect[1].toDouble(),
+              rect[2].toDouble(),
+              rect[3].toDouble(),
+              imgWidth.toDouble(),
+              imgHeight.toDouble(),
+            );
+            boundingBoxes.add(box);
+          }
+        } catch (e) {
+          print('Error processing contour: $e');
+          continue;
         }
       }
-
-      mat.release();
-      binary.release();
-      hierarchy.release();
 
       return boundingBoxes;
     } catch (e) {
       throw Exception('Error extracting bounding boxes: $e');
     }
-  }
+}
 
   List<int> postprocessProbabilityMap(Float32List probMap) {
     const threshold = 0.1;
