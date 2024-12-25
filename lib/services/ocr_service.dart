@@ -110,21 +110,24 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
       [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
     );
 
-    // Create input feeds
     final Map<String, OrtValue> feeds = {'input': tensor};
-    
-    // Specify output names
     final outputNames = ['output'];
     
-    // Run the model - note the corrected run method usage
     final results = await detectionModel!.run(feeds, outputNames);
     
-    // Get the output tensor - results is a List<OrtValue>
     if (results.isEmpty) {
       throw Exception('No output from detection model');
     }
-    
-    final probMap = results[0].value as Float32List;
+
+    final outputTensor = results[0];
+    if (outputTensor == null) {
+      throw Exception('Output tensor is null');
+    }
+
+    final probMap = outputTensor?.value as Float32List?;
+    if (probMap == null) {
+      throw Exception('Tensor value is null');
+    }
     
     final processedProbMap = Float32List.fromList(
       probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList()
@@ -335,26 +338,35 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     // Specify output names
     final outputNames = ['logits'];
     
-    // Run the model - note the corrected run method usage
+    // Run the model
     final results = await recognitionModel!.run(feeds, outputNames);
     
-    // Get the output tensor - results is a List<OrtValue>
     if (results.isEmpty) {
-      throw Exception('No logits tensor found in output');
+      throw Exception('No output from recognition model');
     }
-    
-    final logits = results[0].value as Float32List;
-    
-    // Get dimensions using tensor info
-    final tensorInfo = results[0].typeInfo as OrtTensorTypeInfo;
-    final shape = tensorInfo.dimensions;
-    if (shape.length != 3) {
-      throw Exception('Invalid output shape');
+
+    final outputTensor = results[0];
+    if (outputTensor == null) {
+      throw Exception('Output tensor is null');
     }
-    
-    final batchSize = shape[0];
-    final height = shape[1];
-    final numClasses = shape[2];
+
+    // Get tensor value with null check
+    final logits = outputTensor.value as Float32List?;
+    if (logits == null) {
+      throw Exception('Tensor value is null');
+    }
+
+    // Get dimensions from known constants since we can't access tensor info directly
+    final batchSize = crops.length;
+    final height = OCRConstants.RECOGNITION_TARGET_SIZE[0];
+    final width = OCRConstants.RECOGNITION_TARGET_SIZE[1];
+    final numClasses = OCRConstants.VOCAB.length + 1; // +1 for blank token
+
+    // Validate tensor size
+    final expectedSize = batchSize * height * numClasses;
+    if (logits.length != expectedSize) {
+      throw Exception('Unexpected tensor size: got ${logits.length}, expected $expectedSize');
+    }
 
     // Process logits and apply softmax
     final probabilities = List.generate(batchSize, (b) {
