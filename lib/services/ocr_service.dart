@@ -10,8 +10,8 @@ import 'package:image/image.dart' as img_lib;
 import 'package:onnxruntime/onnxruntime.dart';
 import 'package:opencv_dart/opencv_dart.dart';
 import '../constants.dart';
-import 'package:scaling-sniffle/models/bounding_box.dart';
-import 'package:scaling-sniffle/models/ocr_result.dart';
+import '../models/bounding_box.dart';
+import '../models/ocr_result.dart';
 
 
 class OCRService {
@@ -95,7 +95,6 @@ class OCRService {
       
       // Create ONNX tensor
       final tensor = OrtValueTensor.createTensorWithDataList(
-        TensorElementType.float,
         inputTensor,
         [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
       );
