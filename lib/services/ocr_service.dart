@@ -10,13 +10,7 @@ import 'package:onnxruntime/onnxruntime.dart';
 import 'package:opencv_dart/opencv.dart' as cv;
 import '../constants.dart';
 import '../models/bounding_box.dart';
-
-class OCRResult {
-  final String text;
-  final BoundingBox boundingBox;
-
-  OCRResult({required this.text, required this.boundingBox});
-}
+import '../models/ocr_result.dart';
 
 
 class OCRService {
