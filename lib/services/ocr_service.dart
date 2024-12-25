@@ -1,7 +1,7 @@
 import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'dart:math' show exp, max;
+import 'dart:math' as math;
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -55,37 +55,35 @@ class OCRService {
     }
   }
 
-  Future<Float32List> preprocessImageForDetection(ui.Image image) async {
-    final img = await uiImageToImage(image);
-    if (img == null) throw Exception('Failed to process image');
+Future<Float32List> preprocessImageForDetection(ui.Image image) async {
+  final img = await uiImageToImage(image);
+  if (img == null) throw Exception('Failed to process image');
 
-    final resized = img_lib.copyResize(
-      img,
-      width: OCRConstants.TARGET_SIZE[0],
-      height: OCRConstants.TARGET_SIZE[1],
-    );
+  final resized = img_lib.copyResize(
+    img,
+    width: OCRConstants.TARGET_SIZE[0],
+    height: OCRConstants.TARGET_SIZE[1],
+  );
 
-    final preprocessedData = Float32List(OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 3);
-    
-    for (int y = 0; y < resized.height; y++) {
-      for (int x = 0; x < resized.width; x++) {
-        final pixel = resized.getPixel(x, y);
-        final r = (pixel >> 16) & 0xFF;
-        final g = (pixel >> 8) & 0xFF;
-        final b = pixel & 0xFF;
-        final idx = y * resized.width + x;
-        
-        preprocessedData[idx] = 
-            (r / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
-        preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1]] = 
-            (g / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
-        preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 2] = 
-            (b / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
-      }
+  final preprocessedData = Float32List(OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 3);
+  
+  for (int y = 0; y < resized.height; y++) {
+    for (int x = 0; x < resized.width; x++) {
+      final pixel = resized.getPixel(x, y);
+      final idx = y * resized.width + x;
+      
+      // Use the r, g, b getters directly from the Pixel class
+      preprocessedData[idx] = 
+          (pixel.r.toDouble() / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
+      preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1]] = 
+          (pixel.g.toDouble() / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
+      preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 2] = 
+          (pixel.b.toDouble() / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
     }
-    
-    return preprocessedData;
   }
+  
+  return preprocessedData;
+}
 
   Future<Map<String, dynamic>> detectText(ui.Image image) async {
     if (detectionModel == null) throw Exception('Detection model not loaded');
@@ -121,146 +119,159 @@ class OCRService {
   }
 
 
-  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
-    final imgWidth = OCRConstants.TARGET_SIZE[0];
-    final imgHeight = OCRConstants.TARGET_SIZE[1];
+import 'dart:math' as math; // Add this import at the top of the file
+
+Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
+  final imgWidth = OCRConstants.TARGET_SIZE[0];
+  final imgHeight = OCRConstants.TARGET_SIZE[1];
+  
+  try {
+    // Convert probability map to grayscale image
+    final Uint8List grayImage = Uint8List(imgWidth * imgHeight);
+    for (int i = 0; i < probMap.length; i++) {
+      grayImage[i] = (probMap[i] * 255).round().clamp(0, 255);
+    }
+
+    // Create image from grayscale data
+    final mat = img_lib.Image(
+      width: imgWidth,
+      height: imgHeight,
+      bytes: grayImage,
+    );
+
+    // Apply threshold
+    final binaryImage = img_lib.Image(
+      width: imgWidth,
+      height: imgHeight,
+    );
     
-    try {
-      // Convert probability map to grayscale image
-      final Uint8List grayImage = Uint8List(imgWidth * imgHeight);
-      for (int i = 0; i < probMap.length; i++) {
-        grayImage[i] = (probMap[i] * 255).round().clamp(0, 255);
+    for (int y = 0; y < imgHeight; y++) {
+      for (int x = 0; x < imgWidth; x++) {
+        final pixel = mat.getPixel(x, y);
+        binaryImage.setPixel(x, y, pixel > 77 ? 255 : 0);
       }
+    }
 
-      // Create OpenCV Mat from grayscale image
-      final mat = img_lib.Image(
-        width: imgWidth,
-        height: imgHeight,
-        bytes: grayImage,
-      );
+    // Find connected components (simulating contours)
+    List<BoundingBox> boundingBoxes = [];
+    List<List<bool>> visited = List.generate(
+      imgHeight,
+      (_) => List.filled(imgWidth, false),
+    );
 
-      // Apply threshold
-      final binaryImage = img_lib.Image(
-        width: imgWidth,
-        height: imgHeight,
-      );
-      
-      for (int y = 0; y < imgHeight; y++) {
-        for (int x = 0; x < imgWidth; x++) {
-          final pixel = mat.getPixel(x, y);
-          binaryImage.setPixel(x, y, pixel > 77 ? 255 : 0);
-        }
-      }
-
-      // Find connected components (simulating contours)
-      List<BoundingBox> boundingBoxes = [];
-      bool[][] visited = List.generate(
-        imgHeight,
-        (_) => List.filled(imgWidth, false),
-      );
-
-      for (int y = 0; y < imgHeight; y++) {
-        for (int x = 0; x < imgWidth; x++) {
-          if (!visited[y][x] && binaryImage.getPixel(x, y) == 255) {
-            int minX = x, maxX = x, minY = y, maxY = y;
-            _floodFill(binaryImage, visited, x, y, minX, maxX, minY, maxY);
-            
-            final width = maxX - minX + 1;
-            final height = maxY - minY + 1;
-            
-            if (width > 2 && height > 2) {
-              final box = _transformBoundingBox(
-                minX.toDouble(),
-                minY.toDouble(),
-                width.toDouble(),
-                height.toDouble(),
-                imgWidth.toDouble(),
-                imgHeight.toDouble(),
-              );
-              boundingBoxes.add(box);
-            }
+    for (int y = 0; y < imgHeight; y++) {
+      for (int x = 0; x < imgWidth; x++) {
+        if (!visited[y][x] && binaryImage.getPixel(x, y) == 255) {
+          _BoundingRegion region = _BoundingRegion();
+          _floodFill(binaryImage, visited, x, y, region);
+          
+          final width = region.maxX - region.minX + 1;
+          final height = region.maxY - region.minY + 1;
+          
+          if (width > 2 && height > 2) {
+            final box = _transformBoundingBox(
+              region.minX.toDouble(),
+              region.minY.toDouble(),
+              width.toDouble(),
+              height.toDouble(),
+              imgWidth.toDouble(),
+              imgHeight.toDouble(),
+            );
+            boundingBoxes.add(box);
           }
         }
       }
-
-      return boundingBoxes;
-    } catch (e) {
-      throw Exception('Error extracting bounding boxes: $e');
-    }
-  }
-
-  void _floodFill(
-    img_lib.Image image,
-    List<List<bool>> visited,
-    int x,
-    int y,
-    int minX,
-    int maxX,
-    int minY,
-    int maxY,
-  ) {
-    if (x < 0 || x >= image.width || y < 0 || y >= image.height ||
-        visited[y][x] || image.getPixel(x, y) != 255) {
-      return;
     }
 
-    visited[y][x] = true;
-    minX = min(minX, x);
-    maxX = max(maxX, x);
-    minY = min(minY, y);
-    maxY = max(maxY, y);
-
-    _floodFill(image, visited, x + 1, y, minX, maxX, minY, maxY);
-    _floodFill(image, visited, x - 1, y, minX, maxX, minY, maxY);
-    _floodFill(image, visited, x, y + 1, minX, maxX, minY, maxY);
-    _floodFill(image, visited, x, y - 1, minX, maxX, minY, maxY);
+    return boundingBoxes;
+  } catch (e) {
+    throw Exception('Error extracting bounding boxes: $e');
   }
+}
+
+// Helper class to track bounding region during flood fill
+class _BoundingRegion {
+  int minX = 999999;
+  int maxX = -999999;
+  int minY = 999999;
+  int maxY = -999999;
+
+  void update(int x, int y) {
+    minX = math.min(minX, x);
+    maxX = math.max(maxX, x);
+    minY = math.min(minY, y);
+    maxY = math.max(maxY, y);
+  }
+}
+
+void _floodFill(
+  img_lib.Image image,
+  List<List<bool>> visited,
+  int x,
+  int y,
+  _BoundingRegion region,
+) {
+  if (x < 0 || x >= image.width || 
+      y < 0 || y >= image.height ||
+      visited[y][x] || 
+      image.getPixel(x, y) != 255) {
+    return;
+  }
+
+  visited[y][x] = true;
+  region.update(x, y);
+
+  // Check all four directions
+  _floodFill(image, visited, x + 1, y, region);
+  _floodFill(image, visited, x - 1, y, region);
+  _floodFill(image, visited, x, y + 1, region);
+  _floodFill(image, visited, x, y - 1, region);
+}
 
   List<int> postprocessProbabilityMap(Float32List probMap) {
     const threshold = 0.1;
     return probMap.map((prob) => prob > threshold ? 1 : 0).toList();
   }
 
-  Future<Float32List> preprocessImageForRecognition(List<ui.Image> crops) async {
-    final processedImages = await Future.wait(crops.map((crop) async {
-      final processed = await uiImageToImage(crop);
-      if (processed == null) throw Exception('Failed to process crop');
+Future<Float32List> preprocessImageForRecognition(List<ui.Image> crops) async {
+  final processedImages = await Future.wait(crops.map((crop) async {
+    final img_lib.Image? processed = await uiImageToImage(crop);
+    if (processed == null) throw Exception('Failed to process crop');
 
-      final resized = img_lib.copyResize(
-        processed,
-        width: OCRConstants.RECOGNITION_TARGET_SIZE[1],
-        height: OCRConstants.RECOGNITION_TARGET_SIZE[0],
-      );
+    final resized = img_lib.copyResize(
+      processed,
+      width: OCRConstants.RECOGNITION_TARGET_SIZE[1],
+      height: OCRConstants.RECOGNITION_TARGET_SIZE[0],
+    );
 
-      final float32Data = Float32List(3 * OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]);
-      
-      for (int y = 0; y < resized.height; y++) {
-        for (int x = 0; x < resized.width; x++) {
-          final pixel = resized.getPixel(x, y);
-          final r = (pixel >> 16) & 0xFF;
-          final g = (pixel >> 8) & 0xFF;
-          final b = pixel & 0xFF;
-          final idx = y * resized.width + x;
-          
-          float32Data[idx] = 
-              (r / 255.0 - OCRConstants.REC_MEAN[0]) / OCRConstants.REC_STD[0];
-          float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]] = 
-              (g / 255.0 - OCRConstants.REC_MEAN[1]) / OCRConstants.REC_STD[1];
-          float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1] * 2] = 
-              (b / 255.0 - OCRConstants.REC_MEAN[2]) / OCRConstants.REC_STD[2];
-        }
+    final Float32List float32Data = Float32List(3 * OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]);
+    
+    for (int y = 0; y < resized.height; y++) {
+      for (int x = 0; x < resized.width; x++) {
+        final pixel = resized.getPixel(x, y);
+        final idx = y * resized.width + x;
+        
+        // Use the r, g, b getters directly from the Pixel class
+        float32Data[idx] = 
+            (pixel.r.toDouble() / 255.0 - OCRConstants.REC_MEAN[0]) / OCRConstants.REC_STD[0];
+        float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]] = 
+            (pixel.g.toDouble() / 255.0 - OCRConstants.REC_MEAN[1]) / OCRConstants.REC_STD[1];
+        float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1] * 2] = 
+            (pixel.b.toDouble() / 255.0 - OCRConstants.REC_MEAN[2]) / OCRConstants.REC_STD[2];
       }
-      
-      return float32Data;
-    }));
-
-    final combinedData = Float32List(3 * OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1] * processedImages.length);
-    for (int i = 0; i < processedImages.length; i++) {
-      combinedData.setAll(i * processedImages[0].length, processedImages[i]);
     }
     
-    return combinedData;
+    return float32Data;
+  }));
+
+  // Combine all processed images
+  final combinedData = Float32List(3 * OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1] * processedImages.length);
+  for (int i = 0; i < processedImages.length; i++) {
+    combinedData.setAll(i * processedImages[0].length, processedImages[i]);
   }
+  
+  return combinedData;
+}
 
 Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     if (recognitionModel == null) throw Exception('Recognition model not loaded');
@@ -329,22 +340,6 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
       'bestPath': bestPath,
       'decodedTexts': decodedTexts,
     };
-  }
-
-    String _ctcDecode(List<int> sequence, int blankIndex) {
-    final result = StringBuffer();
-    int? previousClass;
-    
-    for (final currentClass in sequence) {
-      if (currentClass != blankIndex && currentClass != previousClass) {
-        if (currentClass < OCRConstants.VOCAB.length) {
-          result.write(OCRConstants.VOCAB[currentClass]);
-        }
-      }
-      previousClass = currentClass;
-    }
-    
-    return result.toString();
   }
 
 // Helper function to extract RGB values from image pixel
