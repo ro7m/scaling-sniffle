@@ -120,7 +120,7 @@ Future<Float32List> preprocessImageForDetection(ui.Image image) async {
       if (probMap == null) throw Exception('No output from detection model');
       
       final processedProbMap = Float32List.fromList(
-        probMap.map((x) => 1.0 / (1.0 + exp(-x))).toList()
+        probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList()
       );
 
       return {
@@ -379,7 +379,7 @@ Future<List<ui.Image>> cropImages(ui.Image sourceImage, List<BoundingBox> boxes)
 
 List<double> _softmax(List<double> input) {
   final maxVal = input.reduce(max);
-  final expValues = input.map((x) => exp(x - maxVal)).toList();
+  final expValues = input.map((x) => math.exp(x - maxVal)).toList();
   final sumExp = expValues.reduce((a, b) => a + b);
   return expValues.map((x) => x / sumExp).toList();
 }
