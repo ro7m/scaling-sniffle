@@ -5,10 +5,10 @@ import 'dart:math' show exp, max;
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For rootBundle
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img_lib;
 import 'package:onnxruntime/onnxruntime.dart';
-import 'package:opencv_dart/opencv_dart.dart' as cv; // Corrected import
+import 'package:opencv_dart/opencv.dart' as cv;
 import '../constants.dart';
 import '../models/bounding_box.dart';
 import '../models/ocr_result.dart';
@@ -16,24 +16,24 @@ import '../models/ocr_result.dart';
 class OCRService {
   OrtSession? detectionModel;
   OrtSession? recognitionModel;
-
+  
   Future<void> loadModels() async {
     try {
       final sessionOptions = OrtSessionOptions();
       final appDir = await getApplicationDocumentsDirectory();
-
+      
       // Load detection model
       final detectionFile = '${appDir.path}/assets/models/rep_fast_base.onnx';
       final rawdetectionFile = await rootBundle.load(detectionFile);
       final detectionBytes = rawdetectionFile.buffer.asUint8List();
-      detectionModel = OrtSession.fromBuffer(detectionBytes, sessionOptions!);
-
+      detectionModel = await OrtSession.fromBuffer(detectionBytes, sessionOptions);
+      
       // Load recognition model
       final recognitionFile = '${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx';
       final rawrecognitionFile = await rootBundle.load(recognitionFile);
       final recognitionBytes = rawrecognitionFile.buffer.asUint8List();
-      recognitionModel = OrtSession.fromBuffer(recognitionBytes, sessionOptions!);
-
+      recognitionModel = await OrtSession.fromBuffer(recognitionBytes, sessionOptions);
+      
     } catch (e) {
       throw Exception('Error loading models: $e');
     }
@@ -47,8 +47,8 @@ class OCRService {
       return img_lib.Image.fromBytes(
         width: image.width,
         height: image.height,
-        bytes: byteData.buffer.asUint8List(),
-        numChannels: 4,
+        bytes: byteData.buffer,
+        order: img_lib.ChannelOrder.rgba,
       );
     } catch (e) {
       throw Exception('Error converting UI Image: $e');
@@ -66,41 +66,43 @@ class OCRService {
     );
 
     final preprocessedData = Float32List(OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 3);
-
+    
     for (int y = 0; y < resized.height; y++) {
       for (int x = 0; x < resized.width; x++) {
         final pixel = resized.getPixel(x, y);
-        final r = img_lib.getRed(pixel);
-        final g = img_lib.getGreen(pixel);
-        final b = img_lib.getBlue(pixel);
+        final r = (pixel >> 16) & 0xFF;
+        final g = (pixel >> 8) & 0xFF;
+        final b = pixel & 0xFF;
         final idx = y * resized.width + x;
-
-        preprocessedData[idx] = (r / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
-        preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1]] = (g / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
-        preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 2] = (b / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
+        
+        preprocessedData[idx] = 
+            (r / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0];
+        preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1]] = 
+            (g / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1];
+        preprocessedData[idx + OCRConstants.TARGET_SIZE[0] * OCRConstants.TARGET_SIZE[1] * 2] = 
+            (b / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2];
       }
     }
-
+    
     return preprocessedData;
   }
 
   Future<Map<String, dynamic>> detectText(ui.Image image) async {
     if (detectionModel == null) throw Exception('Detection model not loaded');
-
+    
     try {
       final inputTensor = await preprocessImageForDetection(image);
-
-      // Create ONNX tensor
+      
       final tensor = OrtValueTensor.createTensorWithDataList(
-        TensorElementType.float,
-        inputTensor,
+        inputTensor.toList(),
         [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
       );
 
       final feeds = {'input': tensor};
-      final results = await detectionModel!.run(feeds);
-      final probMap = results.values.first.value as Float32List;
-
+      final outputs = {'output': OrtValueTensor};
+      final results = await detectionModel!.run(feeds, outputs);
+      final probMap = results['output']!.value as Float32List;
+      
       final processedProbMap = Float32List.fromList(
         probMap.map((x) => 1.0 / (1.0 + exp(-x))).toList()
       );
@@ -117,51 +119,44 @@ class OCRService {
   Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
     final imgWidth = OCRConstants.TARGET_SIZE[0];
     final imgHeight = OCRConstants.TARGET_SIZE[1];
-
+    
     try {
-      final byteData = Uint8List.fromList(
-        probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList()
-      ).buffer.asUint8List();
-
-      final matrix = await cv.ImgProc.threshold(
-        byteData,
-        imgWidth,
+      final mat = cv.Mat.fromArray(
+        probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList(),
+        cv.CV_8UC1,
         imgHeight,
-        77,
-        255,
-        cv.ImgProc.threshBinary,
+        imgWidth,
       );
+      
+      final threshold = cv.Mat();
+      cv.threshold(mat, threshold, 77, 255, cv.THRESH_BINARY);
 
-      final kernel = await cv.ImgProc.getStructuringElement(
-        cv.ImgProc.morphRect,
-        [2, 2],
+      final kernel = cv.getStructuringElement(
+        cv.MORPH_RECT,
+        cv.Size(2, 2),
       );
+      
+      final opened = cv.Mat();
+      cv.morphologyEx(threshold, opened, cv.MORPH_OPEN, kernel);
 
-      final opened = await cv.ImgProc.morphologyEx(
-        matrix,
-        cv.ImgProc.morphOpen,
-        kernel,
-        iterations: 1,
-      );
-
-      final contours = await cv.ImgProc.findContours(
+      final contours = cv.findContours(
         opened,
-        cv.ImgProc.retrExternal,
-        cv.ImgProc.chainApproxSimple,
+        cv.RETR_EXTERNAL,
+        cv.CHAIN_APPROX_SIMPLE,
       );
 
       List<BoundingBox> boundingBoxes = [];
-
+      
       for (final contour in contours) {
         try {
-          final rect = await cv.ImgProc.boundingRect(contour);
-
-          if (rect[2] > 2 && rect[3] > 2) {
+          final rect = cv.boundingRect(contour);
+          
+          if (rect.width > 2 && rect.height > 2) {
             final box = _transformBoundingBox(
-              rect[0].toDouble(),
-              rect[1].toDouble(),
-              rect[2].toDouble(),
-              rect[3].toDouble(),
+              rect.x.toDouble(),
+              rect.y.toDouble(),
+              rect.width.toDouble(),
+              rect.height.toDouble(),
               imgWidth.toDouble(),
               imgHeight.toDouble(),
             );
@@ -172,6 +167,12 @@ class OCRService {
           continue;
         }
       }
+
+      // Clean up OpenCV resources
+      mat.release();
+      threshold.release();
+      kernel.release();
+      opened.release();
 
       return boundingBoxes;
     } catch (e) {
@@ -186,7 +187,7 @@ class OCRService {
 
   Future<Float32List> preprocessImageForRecognition(List<ui.Image> crops) async {
     final processedImages = await Future.wait(crops.map((crop) async {
-      final img_lib.Image? processed = await uiImageToImage(crop);
+      final processed = await uiImageToImage(crop);
       if (processed == null) throw Exception('Failed to process crop');
 
       final resized = img_lib.copyResize(
@@ -195,178 +196,191 @@ class OCRService {
         height: OCRConstants.RECOGNITION_TARGET_SIZE[0],
       );
 
-      final Float32List float32Data = Float32List(3 * OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]);
-
+      final float32Data = Float32List(3 * OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]);
+      
       for (int y = 0; y < resized.height; y++) {
         for (int x = 0; x < resized.width; x++) {
           final pixel = resized.getPixel(x, y);
-          final r = img_lib.getRed(pixel);
-          final g = img_lib.getGreen(pixel);
-          final b = img_lib.getBlue(pixel);
+          final r = (pixel >> 16) & 0xFF;
+          final g = (pixel >> 8) & 0xFF;
+          final b = pixel & 0xFF;
           final idx = y * resized.width + x;
-
-          float32Data[idx] = (r / 255.0 - OCRConstants.REC_MEAN[0]) / OCRConstants.REC_STD[0];
-          float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]] = (g / 255.0 - OCRConstants.REC_MEAN[1]) / OCRConstants.REC_STD[1];
-          float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1] * 2] = (b / 255.0 - OCRConstants.REC_MEAN[2]) / OCRConstants.REC_STD[2];
+          
+          float32Data[idx] = 
+              (r / 255.0 - OCRConstants.REC_MEAN[0]) / OCRConstants.REC_STD[0];
+          float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1]] = 
+              (g / 255.0 - OCRConstants.REC_MEAN[1]) / OCRConstants.REC_STD[1];
+          float32Data[idx + OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1] * 2] = 
+              (b / 255.0 - OCRConstants.REC_MEAN[2]) / OCRConstants.REC_STD[2];
         }
       }
-
+      
       return float32Data;
     }));
 
-    // Combine all processed images
     final combinedData = Float32List(3 * OCRConstants.RECOGNITION_TARGET_SIZE[0] * OCRConstants.RECOGNITION_TARGET_SIZE[1] * processedImages.length);
     for (int i = 0; i < processedImages.length; i++) {
       combinedData.setAll(i * processedImages[0].length, processedImages[i]);
     }
-
+    
     return combinedData;
   }
 
-  Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
-    if (recognitionModel == null) throw Exception('Recognition model not loaded');
+Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
+  if (recognitionModel == null) throw Exception('Recognition model not loaded');
+  
+  try {
+    final preprocessedData = await preprocessImageForRecognition(crops);
+    
+    final feeds = {
+      'input': OrtValueTensor.createTensorWithDataList(
+        preprocessedData,
+        [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
+      )
+    };
 
-    try {
-      final preprocessedData = await preprocessImageForRecognition(crops);
+    // Run model with feeds and outputs map
+    final outputs = <String, OrtValue>{};
+    await recognitionModel!.run(feeds, outputs);
+    
+    final logits = outputs['logits']!.value as Float32List;
+    final dims = outputs['logits']!.shape;
+    
+    final batchSize = dims[0];
+    final height = dims[1];
+    final numClasses = dims[2];
 
-      final feeds = {
-        'input': OrtValueTensor.createTensorWithDataList(
-          TensorElementType.float,
-          preprocessedData,
-          [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]],
-        )
-      };
-
-      final results = await recognitionModel!.run(feeds);
-      final logits = results['logits']!.data as Float32List;
-      final dims = results['logits']!.shape;
-
-      final batchSize = dims[0];
-      final height = dims[1];
-      final numClasses = dims[2];
-
-      // Process logits and apply softmax
-      final probabilities = List.generate(batchSize, (b) {
-        return List.generate(height, (h) {
-          final positionLogits = List.generate(numClasses, (c) {
-            final index = b * (height * numClasses) + h * numClasses + c;
-            return logits[index].toDouble();
-          });
-          return _softmax(positionLogits);
+    // Process logits and apply softmax
+    final probabilities = List.generate(batchSize, (b) {
+      return List.generate(height, (h) {
+        final positionLogits = List.generate(numClasses, (c) {
+          final index = b * (height * numClasses) + h * numClasses + c;
+          return logits[index];  // Already Float32, no need for toDouble()
         });
+        return _softmax(positionLogits);
       });
+    });
 
-      // Find best path
-      final bestPath = probabilities.map((batchProb) {
-        return batchProb.map((row) {
-          return row.indexOf(row.reduce(max));
-        }).toList();
+    // Find best path
+    final bestPath = probabilities.map((batchProb) {
+      return batchProb.map((row) {
+        return row.indexOf(row.reduce(max));
       }).toList();
+    }).toList();
 
-      // Decode text
-      final decodedTexts = bestPath.map((sequence) {
-        return sequence
-            .where((idx) => idx != numClasses - 1) // Remove blank token
-            .map((idx) => OCRConstants.VOCAB[idx])
-            .join('');
-      }).toList();
+    // Decode text
+    final decodedTexts = bestPath.map((sequence) {
+      return _ctcDecode(sequence, numClasses - 1);  // Assuming last class is blank
+    }).toList();
 
-      return {
-        'probabilities': probabilities,
-        'bestPath': bestPath,
-        'decodedTexts': decodedTexts,
-      };
-    } catch (e) {
-      throw Exception('Error running recognition model: $e');
+    return {
+      'probabilities': probabilities,
+      'bestPath': bestPath,
+      'decodedTexts': decodedTexts,
+    };
+  } catch (e) {
+    throw Exception('Error running recognition model: $e');
+  }
+}
+
+List<double> _softmax(List<double> input) {
+  // Find max value for numerical stability
+  final maxVal = input.reduce(max);
+  
+  // Calculate exp of shifted values
+  final expValues = input.map((x) => exp(x - maxVal)).toList();
+  
+  // Calculate sum of exp values
+  final sumExp = expValues.reduce((a, b) => a + b);
+  
+  // Normalize to get probabilities
+  return expValues.map((x) => x / sumExp).toList();
+}
+
+BoundingBox _transformBoundingBox(
+  double x,
+  double y,
+  double width,
+  double height,
+  double imgWidth,
+  double imgHeight,
+) {
+  // Calculate padding based on box dimensions
+  final offset = (width * height * 1.8) / (2 * (width + height));
+  
+  // Apply padding and ensure coordinates stay within image bounds
+  final x1 = _clamp(x - offset, 0, imgWidth);
+  final y1 = _clamp(y - offset, 0, imgHeight);
+  
+  // Calculate end coordinates with padding
+  final x2 = _clamp(x + width + offset, 0, imgWidth);
+  final y2 = _clamp(y + height + offset, 0, imgHeight);
+  
+  return BoundingBox(
+    x: x1,
+    y: y1,
+    width: x2 - x1,
+    height: y2 - y1,
+  );
+}
+
+Future<List<OCRResult>> processImage(ui.Image image) async {
+  try {
+    // Step 1: Detection
+    final detectionResult = await detectText(image);
+    if (detectionResult.isEmpty) {
+      return [];
     }
-  }
-
-  List<double> _softmax(List<double> input) {
-    final maxVal = input.reduce(max);
-    final exp_values = input.map((x) => exp(x - maxVal)).toList();
-    final sumExp = exp_values.reduce((a, b) => a + b);
-    return exp_values.map((x) => x / sumExp).toList();
-  }
-
-  Future<List<ui.Image>> cropImages(ui.Image sourceImage, List<BoundingBox> boxes) async {
-    List<ui.Image> crops = [];
-
-    for (final box in boxes) {
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-
-      canvas.drawImageRect(
-        sourceImage,
-        Rect.fromLTWH(box.x, box.y, box.width, box.height),
-        Rect.fromLTWH(0, 0, box.width, box.height),
-        Paint(),
-      );
-
-      final picture = recorder.endRecording();
-      final croppedImage = await picture.toImage(
-        box.width.round(),
-        box.height.round(),
-      );
-
-      crops.add(croppedImage);
+    
+    // Step 2: Extract bounding boxes
+    final boundingBoxes = await extractBoundingBoxes(detectionResult['out_map'] as Float32List);
+    if (boundingBoxes.isEmpty) {
+      return [];
     }
-
-    return crops;
+    
+    // Step 3: Crop images based on bounding boxes
+    final crops = await cropImages(image, boundingBoxes);
+    
+    // Step 4: Recognition
+    final recognitionResult = await recognizeText(crops);
+    final decodedTexts = recognitionResult['decodedTexts'] as List<String>;
+    
+    // Step 5: Combine results
+    return List.generate(
+      decodedTexts.length,
+      (i) => OCRResult(
+        text: decodedTexts[i],
+        boundingBox: boundingBoxes[i],
+      ),
+    ).where((result) => result.text.isNotEmpty).toList();
+    
+  } catch (e) {
+    print('Error processing image: $e');
+    return [];  // Return empty list instead of throwing to handle errors gracefully
   }
+}
 
-  BoundingBox _transformBoundingBox(
-    double x,
-    double y,
-    double width,
-    double height,
-    double imgWidth,
-    double imgHeight,
-  ) {
-    final offset = (width * height * 1.8) / (2 * (width + height));
-
-    final x1 = _clamp(x - offset, imgWidth);
-    final x2 = _clamp(x1 + width + 2 * offset, imgWidth);
-    final y1 = _clamp(y - offset, imgHeight);
-    final y2 = _clamp(y1 + height + 2 * offset, imgHeight);
-
-    return BoundingBox(
-      x: x1,
-      y: y1,
-      width: x2 - x1,
-      height: y2 - y1,
-    );
-  }
-
-  double _clamp(double value, double max) {
-    return value.clamp(0, max);
-  }
-
-  Future<List<OCRResult>> processImage(ui.Image image) async {
-    try {
-      // Step 1: Detection
-      final detectionResult = await detectText(image);
-
-      // Step 2: Extract bounding boxes
-      final boundingBoxes = await extractBoundingBoxes(detectionResult['out_map']);
-
-      // Step 3: Crop images based on bounding boxes
-      final crops = await cropImages(image, boundingBoxes);
-
-      // Step 4: Recognition
-      final recognitionResult = await recognizeText(crops);
-
-      // Step 5: Combine results
-      List<OCRResult> results = [];
-      for (int i = 0; i < recognitionResult['decodedTexts'].length; i++) {
-        results.add(OCRResult(
-          text: recognitionResult['decodedTexts'][i],
-          boundingBox: boundingBoxes[i],
-        ));
+// Helper method for CTC decoding
+String _ctcDecode(List<int> sequence, int blankIndex) {
+  final StringBuilder result = StringBuffer();
+  int? previousClass;
+  
+  for (final currentClass in sequence) {
+    if (currentClass != blankIndex && currentClass != previousClass) {
+      if (currentClass < OCRConstants.VOCAB.length) {
+        result.write(OCRConstants.VOCAB[currentClass]);
       }
-
-      return results;
-    } catch (e) {
-      throw Exception('Error processing image: $e');
     }
+    previousClass = currentClass;
   }
+  
+  return result.toString();
+}
+
+// Helper method for clamping values
+double _clamp(double value, double min, double max) {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
 }
