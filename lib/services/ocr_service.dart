@@ -100,7 +100,7 @@ class OCRService {
       );
 
       final feeds = {'input': tensor};
-      final results = await detectionModel!.run(feeds);
+      final results = await detectionModel!.run(feeds, {'input': feeds});
       final probMap = results.values.first.value as Float32List;
       
       final processedProbMap = Float32List.fromList(
