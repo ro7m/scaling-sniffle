@@ -232,19 +232,29 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
   try {
     final preprocessedData = await preprocessImageForRecognition(crops);
     
-    final feeds = {
-      'input': OrtValueTensor.createTensorWithDataList(
-        preprocessedData,
-        [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
-      )
-    };
+    // Create input tensor
+    final tensor = OrtValueTensor.createTensorWithDataList(
+      preprocessedData,
+      [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
+    );
 
-    // Run model with feeds and outputs map
-    final outputs = <String, OrtValue>{};
-    await recognitionModel!.run(feeds, outputs);
+    // Create input feeds
+    final Map<String, OrtValue> feeds = {'input': tensor};
     
-    final logits = outputs['logits']!.value as Float32List;
-    final dims = outputs['logits']!.shape;
+    // Create output map
+    final Map<String, OrtValue> outputs = {};
+    
+    // Run model with proper OrtRunOptions
+    final runOptions = OrtRunOptions();
+    await recognitionModel!.run(runOptions, feeds, outputs);
+    
+    // Get logits from output
+    final logits = outputs['logits']?.value as Float32List;
+    if (logits == null) throw Exception('No output logits found');
+    
+    // Get tensor dimensions
+    final tensorInfo = outputs['logits']?.typeInfo as OrtTensorTypeInfo;
+    final dims = tensorInfo.shape;
     
     final batchSize = dims[0];
     final height = dims[1];
@@ -254,9 +264,9 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     final probabilities = List.generate(batchSize, (b) {
       return List.generate(height, (h) {
         final positionLogits = List.generate(numClasses, (c) {
-          final index = b * (height * numClasses) + h * numClasses + c;
-          return logits[index];  // Already Float32, no need for toDouble()
-        });
+          final idx = b * (height * numClasses) + h * numClasses + c;
+          return logits[idx];
+        }).map((x) => x.toDouble()).toList();
         return _softmax(positionLogits);
       });
     });
@@ -270,7 +280,7 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
 
     // Decode text
     final decodedTexts = bestPath.map((sequence) {
-      return _ctcDecode(sequence, numClasses - 1);  // Assuming last class is blank
+      return _ctcDecode(sequence, numClasses - 1);
     }).toList();
 
     return {
@@ -283,17 +293,47 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
   }
 }
 
+// Helper function to extract RGB values from image pixel
+List<int> _extractRGB(img_lib.Pixel pixel) {
+  // Use the correct method to extract RGB values from image library Pixel
+  return [
+    pixel.r.toInt(),  // Red component
+    pixel.g.toInt(),  // Green component
+    pixel.b.toInt(),  // Blue component
+  ];
+}
+
+Future<List<ui.Image>> cropImages(ui.Image sourceImage, List<BoundingBox> boxes) async {
+  List<ui.Image> crops = [];
+  
+  for (final box in boxes) {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    
+    // Create source and destination rectangles
+    final srcRect = Rect.fromLTWH(box.x, box.y, box.width, box.height);
+    final dstRect = Rect.fromLTWH(0, 0, box.width, box.height);
+    
+    // Draw the cropped portion
+    canvas.drawImageRect(sourceImage, srcRect, dstRect, Paint());
+    
+    // Convert to image
+    final picture = recorder.endRecording();
+    final croppedImage = await picture.toImage(
+      box.width.round(),
+      box.height.round(),
+    );
+    
+    crops.add(croppedImage);
+  }
+  
+  return crops;
+}
+
 List<double> _softmax(List<double> input) {
-  // Find max value for numerical stability
   final maxVal = input.reduce(max);
-  
-  // Calculate exp of shifted values
   final expValues = input.map((x) => exp(x - maxVal)).toList();
-  
-  // Calculate sum of exp values
   final sumExp = expValues.reduce((a, b) => a + b);
-  
-  // Normalize to get probabilities
   return expValues.map((x) => x / sumExp).toList();
 }
 
@@ -322,6 +362,22 @@ BoundingBox _transformBoundingBox(
     width: x2 - x1,
     height: y2 - y1,
   );
+}
+
+String _ctcDecode(List<int> sequence, int blankIndex) {
+  final result = StringBuffer();
+  int? previousClass;
+  
+  for (final currentClass in sequence) {
+    if (currentClass != blankIndex && currentClass != previousClass) {
+      if (currentClass < OCRConstants.VOCAB.length) {
+        result.write(OCRConstants.VOCAB[currentClass]);
+      }
+    }
+    previousClass = currentClass;
+  }
+  
+  return result.toString();
 }
 
 Future<List<OCRResult>> processImage(ui.Image image) async {
@@ -356,25 +412,8 @@ Future<List<OCRResult>> processImage(ui.Image image) async {
     
   } catch (e) {
     print('Error processing image: $e');
-    return [];  // Return empty list instead of throwing to handle errors gracefully
+    return [];
   }
-}
-
-// Helper method for CTC decoding
-String _ctcDecode(List<int> sequence, int blankIndex) {
-  final StringBuilder result = StringBuffer();
-  int? previousClass;
-  
-  for (final currentClass in sequence) {
-    if (currentClass != blankIndex && currentClass != previousClass) {
-      if (currentClass < OCRConstants.VOCAB.length) {
-        result.write(OCRConstants.VOCAB[currentClass]);
-      }
-    }
-    previousClass = currentClass;
-  }
-  
-  return result.toString();
 }
 
 // Helper method for clamping values
