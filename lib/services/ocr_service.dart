@@ -99,36 +99,49 @@ Future<Float32List> preprocessImageForDetection(ui.Image image) async {
   return preprocessedData;
 }
 
-  Future<Map<String, dynamic>> detectText(ui.Image image) async {
-    if (detectionModel == null) throw Exception('Detection model not loaded');
+Future<Map<String, dynamic>> detectText(ui.Image image) async {
+  if (detectionModel == null) throw Exception('Detection model not loaded');
+  
+  try {
+    final inputTensor = await preprocessImageForDetection(image);
     
-    try {
-      final inputTensor = await preprocessImageForDetection(image);
-      
-      final tensor = OrtValueTensor.createTensorWithDataList(
-        inputTensor,
-        [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
-      );
+    final tensor = OrtValueTensor.createTensorWithDataList(
+      inputTensor,
+      [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
+    );
 
-      final feeds = {'input': tensor};
-      // Using the correct run method signature
-      final List<String> outputNames = ['output'];
-      final outputs = await detectionModel!.run(feeds, outputNames);
-      
-      final probMap = outputs.first.value as Float32List;
-      
-      final processedProbMap = Float32List.fromList(
-        probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList()
-      );
-
-      return {
-        'out_map': processedProbMap,
-        'preds': postprocessProbabilityMap(processedProbMap),
-      };
-    } catch (e) {
-      throw Exception('Error running detection model: $e');
+    // Create input feeds
+    final Map<String, OrtValue> feeds = {'input': tensor};
+    
+    // Create output map
+    final Map<String, OrtValue> outputs = {};
+    
+    // Create run options
+    final runOptions = OrtRunOptions();
+    
+    // Run the model with proper parameters
+    await detectionModel!.run(runOptions, feeds, outputs);
+    
+    // Get the output tensor
+    final outputTensor = outputs['output'];
+    if (outputTensor == null) {
+      throw Exception('No output tensor found');
     }
+    
+    final probMap = outputTensor.value as Float32List;
+    
+    final processedProbMap = Float32List.fromList(
+      probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList()
+    );
+
+    return {
+      'out_map': processedProbMap,
+      'preds': postprocessProbabilityMap(processedProbMap),
+    };
+  } catch (e) {
+    throw Exception('Error running detection model: $e');
   }
+}
 
 
 
@@ -310,64 +323,88 @@ Future<Float32List> preprocessImageForRecognition(List<ui.Image> crops) async {
 }
 
 Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
-    if (recognitionModel == null) throw Exception('Recognition model not loaded');
+  if (recognitionModel == null) throw Exception('Recognition model not loaded');
+  
+  try {
+    final preprocessedData = await preprocessImageForRecognition(crops);
     
-    try {
-      final preprocessedData = await preprocessImageForRecognition(crops);
-      
-      final tensor = OrtValueTensor.createTensorWithDataList(
-        preprocessedData,
-        [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
-      );
+    final tensor = OrtValueTensor.createTensorWithDataList(
+      preprocessedData,
+      [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
+    );
 
-      final feeds = {'input': tensor};
-      // Using the correct run method signature
-      final List<String> outputNames = ['logits'];
-      final outputs = await recognitionModel!.run(feeds, outputNames);
-
-      final logits = outputs.first.value as Float32List;
-      
-      // Get dimensions from the shape attribute of OrtValue
-      final shape = outputs.first.shape;
-      if (shape == null || shape.length != 3) {
-        throw Exception('Invalid output shape');
-      }
-      
-      final batchSize = shape[0];
-      final height = shape[1];
-      final numClasses = shape[2];
-
-      // Process logits and apply softmax
-      final probabilities = List.generate(batchSize, (b) {
-        return List.generate(height, (h) {
-          final positionLogits = List.generate(numClasses, (c) {
-            final idx = b * (height * numClasses) + h * numClasses + c;
-            return logits[idx];
-          });
-          return _softmax(positionLogits);
-        });
-      });
-
-      // Find best path and decode text
-      final bestPath = probabilities.map((batchProb) {
-        return batchProb.map((row) {
-          return row.indexOf(row.reduce(math.max));
-        }).toList();
-      }).toList();
-
-      final decodedTexts = bestPath.map((sequence) {
-        return _ctcDecode(sequence, numClasses - 1);
-      }).toList();
-
-      return {
-        'probabilities': probabilities,
-        'bestPath': bestPath,
-        'decodedTexts': decodedTexts,
-      };
-    } catch (e) {
-      throw Exception('Error running recognition model: $e');
+    // Create input feeds
+    final Map<String, OrtValue> feeds = {'input': tensor};
+    
+    // Create output map
+    final Map<String, OrtValue> outputs = {};
+    
+    // Create run options
+    final runOptions = OrtRunOptions();
+    
+    // Run the model
+    await recognitionModel!.run(runOptions, feeds, outputs);
+    
+    // Get the output tensor
+    final outputTensor = outputs['logits'];
+    if (outputTensor == null) {
+      throw Exception('No logits tensor found in output');
     }
+    
+    final logits = outputTensor.value as Float32List;
+    
+    // Get dimensions from the tensor shape
+    final shape = outputTensor.shape;
+    if (shape == null || shape.length != 3) {
+      throw Exception('Invalid output shape');
+    }
+    
+    final batchSize = shape[0];
+    final height = shape[1];
+    final numClasses = shape[2];
+
+    // Process logits and apply softmax
+    final probabilities = List.generate(batchSize, (b) {
+      return List.generate(height, (h) {
+        final positionLogits = List.generate(numClasses, (c) {
+          final idx = (b * height * numClasses + h * numClasses + c).toInt(); // Ensure index is integer
+          // Convert the Float32List value to double explicitly
+          return (logits[idx] as num).toDouble();
+        });
+        return _softmax(positionLogits);
+      });
+    });
+
+    // Find best path and decode text
+    final bestPath = probabilities.map((batchProb) {
+      return batchProb.map((row) {
+        return row.indexOf(row.reduce(math.max));
+      }).toList();
+    }).toList();
+
+    final decodedTexts = bestPath.map((sequence) {
+      return _ctcDecode(sequence, numClasses - 1);
+    }).toList();
+
+    return {
+      'probabilities': probabilities,
+      'bestPath': bestPath,
+      'decodedTexts': decodedTexts,
+    };
+  } catch (e) {
+    throw Exception('Error running recognition model: $e');
   }
+}
+
+// Helper function to convert Float32List values to double
+double _convertToDouble(dynamic value) {
+  if (value is double) return value;
+  if (value is int) return value.toDouble();
+  if (value is num) return value.toDouble();
+  throw Exception('Cannot convert value to double: $value');
+}
+
+
 
 List<int> _extractRGB(img_lib.Pixel pixel) {
   // Use the correct method to extract RGB values from image library Pixel
@@ -405,12 +442,28 @@ Future<List<ui.Image>> cropImages(ui.Image sourceImage, List<BoundingBox> boxes)
   return crops;
 }
 
-  List<double> _softmax(List<double> input) {
-    final maxVal = input.reduce(math.max);
-    final expValues = input.map((x) => math.exp(x - maxVal)).toList();
-    final sumExp = expValues.reduce((a, b) => a + b);
-    return expValues.map((x) => x / sumExp).toList();
+List<double> _softmax(List<double> input) {
+  final maxVal = input.reduce(math.max);
+  final expValues = input.map((x) => math.exp(x - maxVal)).toList();
+  final sumExp = expValues.reduce((a, b) => a + b);
+  return expValues.map((x) => x / sumExp).toList();
+}
+
+String _ctcDecode(List<int> sequence, int blankIndex) {
+  final result = StringBuffer();
+  int? previousClass;
+  
+  for (final currentClass in sequence) {
+    if (currentClass != blankIndex && currentClass != previousClass) {
+      if (currentClass < OCRConstants.VOCAB.length) {
+        result.write(OCRConstants.VOCAB[currentClass]);
+      }
+    }
+    previousClass = currentClass;
   }
+  
+  return result.toString();
+}
 
 BoundingBox _transformBoundingBox(
   double x,
@@ -437,22 +490,6 @@ BoundingBox _transformBoundingBox(
     width: x2 - x1,
     height: y2 - y1,
   );
-}
-
-String _ctcDecode(List<int> sequence, int blankIndex) {
-  final result = StringBuffer();
-  int? previousClass;
-  
-  for (final currentClass in sequence) {
-    if (currentClass != blankIndex && currentClass != previousClass) {
-      if (currentClass < OCRConstants.VOCAB.length) {
-        result.write(OCRConstants.VOCAB[currentClass]);
-      }
-    }
-    previousClass = currentClass;
-  }
-  
-  return result.toString();
 }
 
 Future<List<OCRResult>> processImage(ui.Image image) async {
