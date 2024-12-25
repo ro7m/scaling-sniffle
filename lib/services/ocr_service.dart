@@ -113,7 +113,7 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
     final Map<String, OrtValue> feeds = {'input': tensor};
     final outputNames = ['output'];
     
-    final results = await detectionModel!.run(feeds, outputNames);
+    final results = await detectionModel!.run(tensor, outputNames);
     
     if (results.isEmpty) {
       throw Exception('No output from detection model');
@@ -339,7 +339,7 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     final outputNames = ['logits'];
     
     // Run the model
-    final results = await recognitionModel!.run(feeds, outputNames);
+    final results = await recognitionModel!.run(tensor, outputNames);
     
     if (results.isEmpty) {
       throw Exception('No output from recognition model');
