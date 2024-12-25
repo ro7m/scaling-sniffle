@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/ocr_service.dart';
+import 'package:scaling-sniffle/models/ocr_result.dart';
 
 class BoundingBoxPainter extends CustomPainter {
   final List<OCRResult> results;

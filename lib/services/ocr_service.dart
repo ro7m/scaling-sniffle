@@ -5,12 +5,13 @@ import 'dart:math' show exp, max;
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img_lib;
 import 'package:onnxruntime/onnxruntime.dart';
-import 'package:opencv_dart/opencv.dart' as cv;
+import 'package:opencv_dart/opencv_dart.dart';
 import '../constants.dart';
-import '../models/bounding_box.dart';
-import '../models/ocr_result.dart';
+import 'package:scaling-sniffle/models/bounding_box.dart';
+import 'package:scaling-sniffle/models/ocr_result.dart';
 
 
 class OCRService {
@@ -26,14 +27,14 @@ class OCRService {
       // Load detection model
       final detectionFile = '${appDir.path}/assets/models/rep_fast_base.onnx';
       final rawdetectionFile = await rootBundle.load(detectionFile);
-      final bytes = rawdetectionFile.buffer.asUint8List();
-      detectionModel = OrtSession.fromBuffer(bytes, sessionOptions!);
+      final bytesd = rawdetectionFile.buffer.asUint8List();
+      detectionModel = OrtSession.fromBuffer(bytesd, sessionOptions!);
       
       // Load recognition model
       final recognitionFile = '${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx';
       final rawrecognitionFile = await rootBundle.load(recognitionFile);
-      final bytes = rawrecognitionFile.buffer.asUint8List();
-      recognitionModel = OrtSession.fromBuffer(bytes, sessionOptions!);
+      final bytesr = rawrecognitionFile.buffer.asUint8List();
+      recognitionModel = OrtSession.fromBuffer(bytesr, sessionOptions!);
       
       
     } catch (e) {
