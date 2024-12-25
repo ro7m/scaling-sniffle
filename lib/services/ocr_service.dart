@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img_lib;
 import 'package:path_provider/path_provider.dart';
 import 'package:onnxruntime/onnxruntime.dart';
-import 'package:opencv/core.dart' show ImgProc;
+import 'package:opencv_dart/opencv.dart' as cv;
 import '../constants.dart';
 import '../models/bounding_box.dart';
 
@@ -25,20 +25,22 @@ class OCRService {
   
   Future<void> loadModels() async {
     try {
+      
+      final sessionOptions = OrtSessionOptions();
       final appDir = await getApplicationDocumentsDirectory();
       
-      // Initialize ONNX Runtime
-      final options = OrtSessionOptions();
-      options.setIntraOpNumThreads(1);
-      options.setInterOpNumThreads(1);
-      
       // Load detection model
-      final detectionFile = File('${appDir.path}/assets/models/rep_fast_base.onnx');
-      detectionModel = await OrtSession.fromFile(detectionFile, options);
+      const detectionFile = '${appDir.path}/assets/models/rep_fast_base.onnx';
+      final rawdetectionFile = await rootBundle.load(detectionFile);
+      final bytes = rawdetectionFile.buffer.asUint8List();
+      detectionModel = OrtSession.fromBuffer(bytes, sessionOptions!);
       
       // Load recognition model
-      final recognitionFile = File('${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx');
-      recognitionModel = await OrtSession.fromFile(recognitionFile, options);
+      const recognitionFile = '${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx';
+      final rawrecognitionFile = await rootBundle.load(recognitionFile);
+      final bytes = rawrecognitionFile.buffer.asUint8List();
+      recognitionModel = OrtSession.fromBuffer(bytes, sessionOptions!);
+      
       
     } catch (e) {
       throw Exception('Error loading models: $e');
@@ -97,7 +99,7 @@ class OCRService {
       final inputTensor = await preprocessImageForDetection(image);
       
       // Create ONNX tensor
-      final tensor = OrtTensor.fromList(
+      final tensor = OrtValueTensor.createTensorWithDataList(
         TensorElementType.float,
         inputTensor,
         [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
@@ -235,7 +237,7 @@ class OCRService {
       final preprocessedData = await preprocessImageForRecognition(crops);
       
       final feeds = {
-        'input': OrtValueTensor.createTensor(
+        'input': OrtValueTensor.createTensorWithDataList(
           preprocessedData,
           [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]],
         )
