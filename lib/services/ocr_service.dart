@@ -93,15 +93,19 @@ class OCRService {
     try {
       final inputTensor = await preprocessImageForDetection(image);
       
+      // Create ONNX tensor
       final tensor = OrtValueTensor.createTensorWithDataList(
-        inputTensor.toList(),
-        [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
+        inputTensor,
+        [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
       );
 
       final feeds = {'input': tensor};
-      final outputs = {'output': OrtValueTensor};
-      final results = await detectionModel!.run(feeds, outputs);
-      final probMap = results['output']!.value as Float32List;
+      final runOptions = OrtRunOptions();
+      final outputs = <String, OrtValue>{};
+      await detectionModel!.run(runOptions, feeds, outputs);
+      
+      final probMap = outputs['output']?.value as Float32List;
+      if (probMap == null) throw Exception('No output from detection model');
       
       final processedProbMap = Float32List.fromList(
         probMap.map((x) => 1.0 / (1.0 + exp(-x))).toList()
@@ -116,68 +120,100 @@ class OCRService {
     }
   }
 
+
   Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
     final imgWidth = OCRConstants.TARGET_SIZE[0];
     final imgHeight = OCRConstants.TARGET_SIZE[1];
     
     try {
-      final mat = cv.Mat.fromArray(
-        probMap.map((x) => (x * 255).toInt().clamp(0, 255)).toList(),
-        cv.CV_8UC1,
-        imgHeight,
-        imgWidth,
-      );
-      
-      final threshold = cv.Mat();
-      cv.threshold(mat, threshold, 77, 255, cv.THRESH_BINARY);
+      // Convert probability map to grayscale image
+      final Uint8List grayImage = Uint8List(imgWidth * imgHeight);
+      for (int i = 0; i < probMap.length; i++) {
+        grayImage[i] = (probMap[i] * 255).round().clamp(0, 255);
+      }
 
-      final kernel = cv.getStructuringElement(
-        cv.MORPH_RECT,
-        cv.Size(2, 2),
-      );
-      
-      final opened = cv.Mat();
-      cv.morphologyEx(threshold, opened, cv.MORPH_OPEN, kernel);
-
-      final contours = cv.findContours(
-        opened,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_SIMPLE,
+      // Create OpenCV Mat from grayscale image
+      final mat = img_lib.Image(
+        width: imgWidth,
+        height: imgHeight,
+        bytes: grayImage,
       );
 
-      List<BoundingBox> boundingBoxes = [];
+      // Apply threshold
+      final binaryImage = img_lib.Image(
+        width: imgWidth,
+        height: imgHeight,
+      );
       
-      for (final contour in contours) {
-        try {
-          final rect = cv.boundingRect(contour);
-          
-          if (rect.width > 2 && rect.height > 2) {
-            final box = _transformBoundingBox(
-              rect.x.toDouble(),
-              rect.y.toDouble(),
-              rect.width.toDouble(),
-              rect.height.toDouble(),
-              imgWidth.toDouble(),
-              imgHeight.toDouble(),
-            );
-            boundingBoxes.add(box);
-          }
-        } catch (e) {
-          print('Error processing contour: $e');
-          continue;
+      for (int y = 0; y < imgHeight; y++) {
+        for (int x = 0; x < imgWidth; x++) {
+          final pixel = mat.getPixel(x, y);
+          binaryImage.setPixel(x, y, pixel > 77 ? 255 : 0);
         }
       }
 
-      // Clean up OpenCV resources
-      mat.release();
-      threshold.release();
-      kernel.release();
-      opened.release();
+      // Find connected components (simulating contours)
+      List<BoundingBox> boundingBoxes = [];
+      bool[][] visited = List.generate(
+        imgHeight,
+        (_) => List.filled(imgWidth, false),
+      );
+
+      for (int y = 0; y < imgHeight; y++) {
+        for (int x = 0; x < imgWidth; x++) {
+          if (!visited[y][x] && binaryImage.getPixel(x, y) == 255) {
+            int minX = x, maxX = x, minY = y, maxY = y;
+            _floodFill(binaryImage, visited, x, y, minX, maxX, minY, maxY);
+            
+            final width = maxX - minX + 1;
+            final height = maxY - minY + 1;
+            
+            if (width > 2 && height > 2) {
+              final box = _transformBoundingBox(
+                minX.toDouble(),
+                minY.toDouble(),
+                width.toDouble(),
+                height.toDouble(),
+                imgWidth.toDouble(),
+                imgHeight.toDouble(),
+              );
+              boundingBoxes.add(box);
+            }
+          }
+        }
+      }
 
       return boundingBoxes;
     } catch (e) {
       throw Exception('Error extracting bounding boxes: $e');
     }
+  }
+
+  void _floodFill(
+    img_lib.Image image,
+    List<List<bool>> visited,
+    int x,
+    int y,
+    int minX,
+    int maxX,
+    int minY,
+    int maxY,
+  ) {
+    if (x < 0 || x >= image.width || y < 0 || y >= image.height ||
+        visited[y][x] || image.getPixel(x, y) != 255) {
+      return;
+    }
+
+    visited[y][x] = true;
+    minX = min(minX, x);
+    maxX = max(maxX, x);
+    minY = min(minY, y);
+    maxY = max(maxY, y);
+
+    _floodFill(image, visited, x + 1, y, minX, maxX, minY, maxY);
+    _floodFill(image, visited, x - 1, y, minX, maxX, minY, maxY);
+    _floodFill(image, visited, x, y + 1, minX, maxX, minY, maxY);
+    _floodFill(image, visited, x, y - 1, minX, maxX, minY, maxY);
   }
 
   List<int> postprocessProbabilityMap(Float32List probMap) {
@@ -227,71 +263,89 @@ class OCRService {
   }
 
 Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
-  if (recognitionModel == null) throw Exception('Recognition model not loaded');
-  
-  try {
-    final preprocessedData = await preprocessImageForRecognition(crops);
+    if (recognitionModel == null) throw Exception('Recognition model not loaded');
     
-    // Create input tensor
-    final tensor = OrtValueTensor.createTensorWithDataList(
-      preprocessedData,
-      [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
-    );
+    try {
+      final preprocessedData = await preprocessImageForRecognition(crops);
+      
+      final tensor = OrtValueTensor.createTensorWithDataList(
+        preprocessedData,
+        [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
+      );
 
-    // Create input feeds
-    final Map<String, OrtValue> feeds = {'input': tensor};
-    
-    // Create output map
-    final Map<String, OrtValue> outputs = {};
-    
-    // Run model with proper OrtRunOptions
-    final runOptions = OrtRunOptions();
-    await recognitionModel!.run(runOptions, feeds, outputs);
-    
-    // Get logits from output
-    final logits = outputs['logits']?.value as Float32List;
-    if (logits == null) throw Exception('No output logits found');
-    
-    // Get tensor dimensions
-    final tensorInfo = outputs['logits']?.typeInfo as OrtTensorTypeInfo;
-    final dims = tensorInfo.shape;
-    
-    final batchSize = dims[0];
-    final height = dims[1];
-    final numClasses = dims[2];
+      final feeds = {'input': tensor};
+      final runOptions = OrtRunOptions();
+      final outputs = <String, OrtValue>{};
+      await recognitionModel!.run(runOptions, feeds, outputs);
 
-    // Process logits and apply softmax
-    final probabilities = List.generate(batchSize, (b) {
-      return List.generate(height, (h) {
-        final positionLogits = List.generate(numClasses, (c) {
-          final idx = b * (height * numClasses) + h * numClasses + c;
-          return logits[idx];
-        }).map((x) => x.toDouble()).toList();
-        return _softmax(positionLogits);
+      final logits = outputs['logits']?.value as Float32List;
+      if (logits == null) throw Exception('No output from recognition model');
+
+      // Get tensor dimensions from the shape
+      final dimensions = outputs['logits']?.getTensorTypeAndShapeInfo().dimensions;
+      if (dimensions == null) throw Exception('Invalid output shape');
+      
+      final batchSize = dimensions[0];
+      final height = dimensions[1];
+      final numClasses = dimensions[2];
+
+      // Process logits and apply softmax
+      final probabilities = List.generate(batchSize, (b) {
+        return List.generate(height, (h) {
+          final positionLogits = List.generate(numClasses, (c) {
+            final idx = b * (height * numClasses) + h * numClasses + c;
+            return logits[idx].toDouble();
+          });
+          return _softmax(positionLogits);
+        });
       });
-    });
 
-    // Find best path
+      // Find best path and decode text
+      final results = _decodeCTCOutput(probabilities, numClasses);
+
+      return {
+        'probabilities': probabilities,
+        'bestPath': results['bestPath'],
+        'decodedTexts': results['decodedTexts'],
+      };
+    } catch (e) {
+      throw Exception('Error running recognition model: $e');
+    }
+  }
+
+
+  Map<String, dynamic> _decodeCTCOutput(List<List<List<double>>> probabilities, int numClasses) {
     final bestPath = probabilities.map((batchProb) {
       return batchProb.map((row) {
         return row.indexOf(row.reduce(max));
       }).toList();
     }).toList();
 
-    // Decode text
     final decodedTexts = bestPath.map((sequence) {
       return _ctcDecode(sequence, numClasses - 1);
     }).toList();
 
     return {
-      'probabilities': probabilities,
       'bestPath': bestPath,
       'decodedTexts': decodedTexts,
     };
-  } catch (e) {
-    throw Exception('Error running recognition model: $e');
   }
-}
+
+    String _ctcDecode(List<int> sequence, int blankIndex) {
+    final result = StringBuffer();
+    int? previousClass;
+    
+    for (final currentClass in sequence) {
+      if (currentClass != blankIndex && currentClass != previousClass) {
+        if (currentClass < OCRConstants.VOCAB.length) {
+          result.write(OCRConstants.VOCAB[currentClass]);
+        }
+      }
+      previousClass = currentClass;
+    }
+    
+    return result.toString();
+  }
 
 // Helper function to extract RGB values from image pixel
 List<int> _extractRGB(img_lib.Pixel pixel) {
@@ -422,4 +476,5 @@ double _clamp(double value, double min, double max) {
   if (value > max) return max;
   return value;
 }
+
 }
