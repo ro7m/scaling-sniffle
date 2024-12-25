@@ -1,3 +1,4 @@
+import 'package:path_provider/path_provider.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:math' show exp, max;
@@ -5,7 +6,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img_lib;
-import 'package:path_provider/path_provider.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 import 'package:opencv_dart/opencv.dart' as cv;
 import '../constants.dart';
@@ -24,13 +24,13 @@ class OCRService {
       final appDir = await getApplicationDocumentsDirectory();
       
       // Load detection model
-      const detectionFile = '${appDir.path}/assets/models/rep_fast_base.onnx';
+      final detectionFile = '${appDir.path}/assets/models/rep_fast_base.onnx';
       final rawdetectionFile = await rootBundle.load(detectionFile);
       final bytes = rawdetectionFile.buffer.asUint8List();
       detectionModel = OrtSession.fromBuffer(bytes, sessionOptions!);
       
       // Load recognition model
-      const recognitionFile = '${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx';
+      final recognitionFile = '${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx';
       final rawrecognitionFile = await rootBundle.load(recognitionFile);
       final bytes = rawrecognitionFile.buffer.asUint8List();
       recognitionModel = OrtSession.fromBuffer(bytes, sessionOptions!);
