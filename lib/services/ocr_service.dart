@@ -105,19 +105,17 @@ Future<Float32List> preprocessImageForDetection(ui.Image image) async {
     try {
       final inputTensor = await preprocessImageForDetection(image);
       
-      // Create ONNX tensor
       final tensor = OrtValueTensor.createTensorWithDataList(
         inputTensor,
         [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
       );
 
       final feeds = {'input': tensor};
-      final runOptions = OrtRunOptions();
-      final outputs = <String, OrtValue>{};
-      await detectionModel!.run(runOptions, feeds, outputs);
+      // Using the correct run method signature
+      final List<String> outputNames = ['output'];
+      final outputs = await detectionModel!.run(feeds, outputNames);
       
-      final probMap = outputs['output']?.value as Float32List;
-      if (probMap == null) throw Exception('No output from detection model');
+      final probMap = outputs.first.value as Float32List;
       
       final processedProbMap = Float32List.fromList(
         probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList()
@@ -135,72 +133,112 @@ Future<Float32List> preprocessImageForDetection(ui.Image image) async {
 
 
 Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
-  final imgWidth = OCRConstants.TARGET_SIZE[0];
-  final imgHeight = OCRConstants.TARGET_SIZE[1];
-  
-  try {
-    // Convert probability map to grayscale image
-    final Uint8List grayImage = Uint8List(imgWidth * imgHeight);
-    for (int i = 0; i < probMap.length; i++) {
-      grayImage[i] = (probMap[i] * 255).round().clamp(0, 255);
-    }
-
-    // Create image from grayscale data
-    final mat = img_lib.Image(
-      width: imgWidth,
-      height: imgHeight,
-      bytes: grayImage,
-    );
-
-    // Apply threshold
-    final binaryImage = img_lib.Image(
-      width: imgWidth,
-      height: imgHeight,
-    );
+    final imgWidth = OCRConstants.TARGET_SIZE[0];
+    final imgHeight = OCRConstants.TARGET_SIZE[1];
     
-    for (int y = 0; y < imgHeight; y++) {
-      for (int x = 0; x < imgWidth; x++) {
-        final pixel = mat.getPixel(x, y);
-        binaryImage.setPixel(x, y, pixel > 77 ? 255 : 0);
+    try {
+      // Convert probability map to grayscale image
+      final Uint8List grayImage = Uint8List(imgWidth * imgHeight);
+      for (int i = 0; i < probMap.length; i++) {
+        grayImage[i] = (probMap[i] * 255).round().clamp(0, 255);
       }
-    }
 
-    // Find connected components (simulating contours)
-    List<BoundingBox> boundingBoxes = [];
-    List<List<bool>> visited = List.generate(
-      imgHeight,
-      (_) => List.filled(imgWidth, false),
-    );
+      // Create image from grayscale data
+      final mat = img_lib.Image.fromBytes(
+        width: imgWidth,
+        height: imgHeight,
+        bytes: grayImage.buffer,
+        numChannels: 1,
+        order: img_lib.ChannelOrder.rgba,
+      );
 
-    for (int y = 0; y < imgHeight; y++) {
-      for (int x = 0; x < imgWidth; x++) {
-        if (!visited[y][x] && binaryImage.getPixel(x, y) == 255) {
-          _BoundingRegion region = _BoundingRegion();
-          _floodFill(binaryImage, visited, x, y, region);
-          
-          final width = region.maxX - region.minX + 1;
-          final height = region.maxY - region.minY + 1;
-          
-          if (width > 2 && height > 2) {
-            final box = _transformBoundingBox(
-              region.minX.toDouble(),
-              region.minY.toDouble(),
-              width.toDouble(),
-              height.toDouble(),
-              imgWidth.toDouble(),
-              imgHeight.toDouble(),
-            );
-            boundingBoxes.add(box);
+      // Apply threshold
+      final binaryImage = img_lib.Image(
+        width: imgWidth,
+        height: imgHeight,
+      );
+    
+      for (int y = 0; y < imgHeight; y++) {
+        for (int x = 0; x < imgWidth; x++) {
+          final pixelValue = mat.getPixel(x, y).r > 77 ? 255 : 0;
+          binaryImage.setPixel(x, y, img_lib.ColorRgb8(pixelValue, pixelValue, pixelValue));
+        }
+      }
+
+      // Find connected components
+      List<BoundingBox> boundingBoxes = [];
+      List<List<bool>> visited = List.generate(
+        imgHeight,
+        (_) => List.filled(imgWidth, false),
+      );
+
+      for (int y = 0; y < imgHeight; y++) {
+        for (int x = 0; x < imgWidth; x++) {
+          if (!visited[y][x] && binaryImage.getPixel(x, y).r == 255) {
+            var bounds = _findComponentBounds(binaryImage, visited, x, y);
+            
+            final width = bounds['maxX']! - bounds['minX']! + 1;
+            final height = bounds['maxY']! - bounds['minY']! + 1;
+            
+            if (width > 2 && height > 2) {
+              final box = _transformBoundingBox(
+                bounds['minX']!.toDouble(),
+                bounds['minY']!.toDouble(),
+                width.toDouble(),
+                height.toDouble(),
+                imgWidth.toDouble(),
+                imgHeight.toDouble(),
+              );
+              boundingBoxes.add(box);
+            }
           }
         }
       }
-    }
 
-    return boundingBoxes;
-  } catch (e) {
-    throw Exception('Error extracting bounding boxes: $e');
+      return boundingBoxes;
+    } catch (e) {
+      throw Exception('Error extracting bounding boxes: $e');
+    }
   }
-}
+
+Map<String, int> _findComponentBounds(
+    img_lib.Image image,
+    List<List<bool>> visited,
+    int startX,
+    int startY,
+  ) {
+    int minX = startX, maxX = startX, minY = startY, maxY = startY;
+    final queue = <List<int>>[];
+    queue.add([startX, startY]);
+    
+    while (queue.isNotEmpty) {
+      final point = queue.removeAt(0);
+      final x = point[0], y = point[1];
+      
+      if (x < 0 || x >= image.width || y < 0 || y >= image.height ||
+          visited[y][x] || image.getPixel(x, y).r != 255) {
+        continue;
+      }
+      
+      visited[y][x] = true;
+      minX = math.min(minX, x);
+      maxX = math.max(maxX, x);
+      minY = math.min(minY, y);
+      maxY = math.max(maxY, y);
+      
+      queue.add([x + 1, y]);
+      queue.add([x - 1, y]);
+      queue.add([x, y + 1]);
+      queue.add([x, y - 1]);
+    }
+    
+    return {
+      'minX': minX,
+      'maxX': maxX,
+      'minY': minY,
+      'maxY': maxY,
+    };
+  }  
 
 void _floodFill(
   img_lib.Image image,
@@ -283,64 +321,54 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
       );
 
       final feeds = {'input': tensor};
-      final runOptions = OrtRunOptions();
-      final outputs = <String, OrtValue>{};
-      await recognitionModel!.run(runOptions, feeds, outputs);
+      // Using the correct run method signature
+      final List<String> outputNames = ['logits'];
+      final outputs = await recognitionModel!.run(feeds, outputNames);
 
-      final logits = outputs['logits']?.value as Float32List;
-      if (logits == null) throw Exception('No output from recognition model');
-
-      // Get tensor dimensions from the shape
-      final dimensions = outputs['logits']?.getTensorTypeAndShapeInfo().dimensions;
-      if (dimensions == null) throw Exception('Invalid output shape');
+      final logits = outputs.first.value as Float32List;
       
-      final batchSize = dimensions[0];
-      final height = dimensions[1];
-      final numClasses = dimensions[2];
+      // Get dimensions from the shape attribute of OrtValue
+      final shape = outputs.first.shape;
+      if (shape == null || shape.length != 3) {
+        throw Exception('Invalid output shape');
+      }
+      
+      final batchSize = shape[0];
+      final height = shape[1];
+      final numClasses = shape[2];
 
       // Process logits and apply softmax
       final probabilities = List.generate(batchSize, (b) {
         return List.generate(height, (h) {
           final positionLogits = List.generate(numClasses, (c) {
             final idx = b * (height * numClasses) + h * numClasses + c;
-            return logits[idx].toDouble();
+            return logits[idx];
           });
           return _softmax(positionLogits);
         });
       });
 
       // Find best path and decode text
-      final results = _decodeCTCOutput(probabilities, numClasses);
+      final bestPath = probabilities.map((batchProb) {
+        return batchProb.map((row) {
+          return row.indexOf(row.reduce(math.max));
+        }).toList();
+      }).toList();
+
+      final decodedTexts = bestPath.map((sequence) {
+        return _ctcDecode(sequence, numClasses - 1);
+      }).toList();
 
       return {
         'probabilities': probabilities,
-        'bestPath': results['bestPath'],
-        'decodedTexts': results['decodedTexts'],
+        'bestPath': bestPath,
+        'decodedTexts': decodedTexts,
       };
     } catch (e) {
       throw Exception('Error running recognition model: $e');
     }
   }
 
-
-  Map<String, dynamic> _decodeCTCOutput(List<List<List<double>>> probabilities, int numClasses) {
-    final bestPath = probabilities.map((batchProb) {
-      return batchProb.map((row) {
-        return row.indexOf(row.reduce(max));
-      }).toList();
-    }).toList();
-
-    final decodedTexts = bestPath.map((sequence) {
-      return _ctcDecode(sequence, numClasses - 1);
-    }).toList();
-
-    return {
-      'bestPath': bestPath,
-      'decodedTexts': decodedTexts,
-    };
-  }
-
-// Helper function to extract RGB values from image pixel
 List<int> _extractRGB(img_lib.Pixel pixel) {
   // Use the correct method to extract RGB values from image library Pixel
   return [
@@ -377,12 +405,12 @@ Future<List<ui.Image>> cropImages(ui.Image sourceImage, List<BoundingBox> boxes)
   return crops;
 }
 
-List<double> _softmax(List<double> input) {
-  final maxVal = input.reduce(max);
-  final expValues = input.map((x) => math.exp(x - maxVal)).toList();
-  final sumExp = expValues.reduce((a, b) => a + b);
-  return expValues.map((x) => x / sumExp).toList();
-}
+  List<double> _softmax(List<double> input) {
+    final maxVal = input.reduce(math.max);
+    final expValues = input.map((x) => math.exp(x - maxVal)).toList();
+    final sumExp = expValues.reduce((a, b) => a + b);
+    return expValues.map((x) => x / sumExp).toList();
+  }
 
 BoundingBox _transformBoundingBox(
   double x,
