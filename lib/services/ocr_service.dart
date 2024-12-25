@@ -13,6 +13,20 @@ import '../constants.dart';
 import '../models/bounding_box.dart';
 import '../models/ocr_result.dart';
 
+class _BoundingRegion {
+  int minX = 999999;
+  int maxX = -999999;
+  int minY = 999999;
+  int maxY = -999999;
+
+  void update(int x, int y) {
+    minX = math.min(minX, x);
+    maxX = math.max(maxX, x);
+    minY = math.min(minY, y);
+    maxY = math.max(maxY, y);
+  }
+}
+
 class OCRService {
   OrtSession? detectionModel;
   OrtSession? recognitionModel;
@@ -119,7 +133,6 @@ Future<Float32List> preprocessImageForDetection(ui.Image image) async {
   }
 
 
-import 'dart:math' as math; // Add this import at the top of the file
 
 Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
   final imgWidth = OCRConstants.TARGET_SIZE[0];
@@ -186,21 +199,6 @@ Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
     return boundingBoxes;
   } catch (e) {
     throw Exception('Error extracting bounding boxes: $e');
-  }
-}
-
-// Helper class to track bounding region during flood fill
-class _BoundingRegion {
-  int minX = 999999;
-  int maxX = -999999;
-  int minY = 999999;
-  int maxY = -999999;
-
-  void update(int x, int y) {
-    minX = math.min(minX, x);
-    maxX = math.max(maxX, x);
-    minY = math.min(minY, y);
-    maxY = math.max(maxY, y);
   }
 }
 
