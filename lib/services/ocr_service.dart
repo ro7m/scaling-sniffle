@@ -113,22 +113,18 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
     // Create input feeds
     final Map<String, OrtValue> feeds = {'input': tensor};
     
-    // Create output map
-    final Map<String, OrtValue> outputs = {};
+    // Specify output names
+    final outputNames = ['output'];
     
-    // Create run options
-    final runOptions = OrtRunOptions();
+    // Run the model - note the corrected run method usage
+    final results = await detectionModel!.run(feeds, outputNames);
     
-    // Run the model with proper parameters
-    await detectionModel!.run(runOptions, feeds, outputs);
-    
-    // Get the output tensor
-    final outputTensor = outputs['output'];
-    if (outputTensor == null) {
-      throw Exception('No output tensor found');
+    // Get the output tensor - results is a List<OrtValue>
+    if (results.isEmpty) {
+      throw Exception('No output from detection model');
     }
     
-    final probMap = outputTensor.value as Float32List;
+    final probMap = results[0].value as Float32List;
     
     final processedProbMap = Float32List.fromList(
       probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList()
@@ -336,26 +332,23 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     // Create input feeds
     final Map<String, OrtValue> feeds = {'input': tensor};
     
-    // Create output map
-    final Map<String, OrtValue> outputs = {};
+    // Specify output names
+    final outputNames = ['logits'];
     
-    // Create run options
-    final runOptions = OrtRunOptions();
+    // Run the model - note the corrected run method usage
+    final results = await recognitionModel!.run(feeds, outputNames);
     
-    // Run the model
-    await recognitionModel!.run(runOptions, feeds, outputs);
-    
-    // Get the output tensor
-    final outputTensor = outputs['logits'];
-    if (outputTensor == null) {
+    // Get the output tensor - results is a List<OrtValue>
+    if (results.isEmpty) {
       throw Exception('No logits tensor found in output');
     }
     
-    final logits = outputTensor.value as Float32List;
+    final logits = results[0].value as Float32List;
     
-    // Get dimensions from the tensor shape
-    final shape = outputTensor.shape;
-    if (shape == null || shape.length != 3) {
+    // Get dimensions using tensor info
+    final tensorInfo = results[0].typeInfo as OrtTensorTypeInfo;
+    final shape = tensorInfo.dimensions;
+    if (shape.length != 3) {
       throw Exception('Invalid output shape');
     }
     
@@ -367,9 +360,8 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     final probabilities = List.generate(batchSize, (b) {
       return List.generate(height, (h) {
         final positionLogits = List.generate(numClasses, (c) {
-          final idx = (b * height * numClasses + h * numClasses + c).toInt(); // Ensure index is integer
-          // Convert the Float32List value to double explicitly
-          return (logits[idx] as num).toDouble();
+          final idx = (b * height * numClasses + h * numClasses + c).toInt();
+          return logits[idx].toDouble();
         });
         return _softmax(positionLogits);
       });
