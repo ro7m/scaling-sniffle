@@ -141,7 +141,7 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
         // Cleanup resources
         tensor.release();
         runOptions.release();
-        outputs?.forEach((element) {
+        outputs.forEach((element) {
           element?.release();
         });
       }
@@ -397,7 +397,7 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
         // Cleanup resources
         tensor.release();
         runOptions.release();
-        outputs?.forEach((element) {
+        outputs.forEach((element) {
           element?.release();
         });
       }
