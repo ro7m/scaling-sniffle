@@ -29,6 +29,8 @@ class _BoundingRegion {
 class OCRService {
   OrtSession? detectionModel;
   OrtSession? recognitionModel;
+  void Function(String)? debugCallback;
+
   
 Future<void> loadModels() async {
   try {
@@ -44,6 +46,10 @@ Future<void> loadModels() async {
       sessionOptions
     );
     
+    debugCallback?.call('Detection model bytes loaded: ${detectionBytes.lengthInBytes} bytes');
+    debugCallback?.call('Detection model initialized successfully');
+
+    
     // Load recognition model directly from assets
     final recognitionBytes = await rootBundle.load('assets/models/crnn_mobilenet_v3_large.onnx');
     recognitionModel = OrtSession.fromBuffer(
@@ -53,7 +59,13 @@ Future<void> loadModels() async {
       ),
       sessionOptions
     );
+      
+      debugCallback?.call('Recognition model bytes loaded: ${recognitionBytes.lengthInBytes} bytes');
+
+      debugCallback?.call('Recognition model initialized successfully');
+      debugCallback?.call('All models loaded successfully');
     
+
   } catch (e) {
     print('Error loading models: $e'); // Debug print
     throw Exception('Error loading models: $e');
@@ -360,6 +372,8 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
       try {
         // Run model inference using runAsync
          outputs = await recognitionModel?.runAsync(runOptions, inputs);
+        debugCallback?.call('recognitionModel runAsync completed...');
+
         
         if (outputs == null || outputs.isEmpty) {
           throw Exception('No output from recognition model');
@@ -529,10 +543,16 @@ Future<List<OCRResult>> processImage(ui.Image image) async {
     
     // Step 3: Crop images based on bounding boxes
     final crops = await cropImages(image, boundingBoxes);
+
+    debugCallback?.call('cropImages completed...');
     
     // Step 4: Recognition
     final recognitionResult = await recognizeText(crops);
+    debugCallback?.call('recognizeText completed...');
+
     final decodedTexts = recognitionResult['decodedTexts'] as List<String>;
+
+    debugCallback?.call('decodedTexts completed...');
     
     // Step 5: Combine results
     return List.generate(
