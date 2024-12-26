@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img_lib;
 import 'package:onnxruntime/onnxruntime.dart';
-import 'package:onnxruntime/tensortype.dart';  
 import 'package:opencv_dart/opencv.dart' as cv;
 import '../constants.dart';
 import '../models/bounding_box.dart';
@@ -106,21 +105,23 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
     try {
       final inputTensor = await preprocessImageForDetection(image);
       
-      // Create ONNX tensor with proper element type
+      // Create ONNX tensor with correct number of arguments
       final tensor = OrtValueTensor.createTensorWithDataList(
-        TensorElementType.float,  // Add this to specify tensor type
         inputTensor,
         [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
       );
 
       // Create input feeds map
       final Map<String, OrtValue> feeds = {'input': tensor};
+      
+      // Create empty map for outputs
+      final Map<String, OrtValue> outputs = {};
 
-      // Run model inference
-      final results = await detectionModel!.run(feeds);
+      // Run model inference with required arguments
+      await detectionModel!.run(feeds, outputs);
       
       // Get probability map from results
-      final outputTensor = results['output'];
+      final outputTensor = outputs['output'];
       if (outputTensor == null) {
         throw Exception('No output found in model results');
       }
@@ -128,7 +129,7 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
       final probMap = outputTensor.value as Float32List;
       
       final processedProbMap = Float32List.fromList(
-        probMap.map((x) => 1.0 / (1.0 + exp(-x))).toList()
+        probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList() // Use math.exp
       );
 
       return {
@@ -325,35 +326,33 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     try {
       final preprocessedData = await preprocessImageForRecognition(crops);
       
-      // Create input tensor
+      // Create tensor with correct number of arguments
       final tensor = OrtValueTensor.createTensorWithDataList(
-        TensorElementType.float,  // Add this to specify tensor type
         preprocessedData,
         [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
       );
 
       // Create input feeds map
       final Map<String, OrtValue> feeds = {'input': tensor};
+      
+      // Create empty map for outputs
+      final Map<String, OrtValue> outputs = {};
 
-      // Run model inference
-      final results = await recognitionModel!.run(feeds);
+      // Run model inference with required arguments
+      await recognitionModel!.run(feeds, outputs);
       
       // Get logits from results
-      final logitsValue = results['logits'];
+      final logitsValue = outputs['logits'];
       if (logitsValue == null) {
         throw Exception('No logits found in model output');
       }
 
       final logits = logitsValue.value as Float32List;
-      final dims = logitsValue.shape ?? [
-        crops.length,
-        OCRConstants.RECOGNITION_TARGET_SIZE[0],
-        OCRConstants.VOCAB.length + 1  // +1 for blank token
-      ];
       
-      final batchSize = dims[0];
-      final height = dims[1];
-      final numClasses = dims[2];
+      // Use constants for dimensions if shape is not available
+      final batchSize = crops.length;
+      final height = OCRConstants.RECOGNITION_TARGET_SIZE[0];
+      final numClasses = OCRConstants.VOCAB.length + 1; // +1 for blank token
 
       // Process logits and apply softmax
       final probabilities = List.generate(batchSize, (b) {
@@ -369,14 +368,13 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
       // Find best path
       final bestPath = probabilities.map((batchProb) {
         return batchProb.map((row) {
-          return row.indexOf(row.reduce(max));
+          return row.indexOf(row.reduce(math.max)); // Use math.max
         }).toList();
       }).toList();
 
-      // Decode text
       final decodedTexts = bestPath.map((sequence) {
         return sequence
-            .where((idx) => idx != numClasses - 1) // Remove blank token
+            .where((idx) => idx != numClasses - 1)
             .map((idx) => OCRConstants.VOCAB[idx])
             .join('');
       }).toList();
