@@ -25,22 +25,42 @@ Future<void> main() async {
 }
 
 Future<void> copyModelsToDocuments() async {
-  final appDir = await getApplicationDocumentsDirectory();
-  final modelsDir = Directory('${appDir.path}/assets/models');
-  await modelsDir.create(recursive: true);
-
-  // Copy models from assets to documents
-  final manifestContent = await rootBundle.loadString('AssetManifest.json');
-  final Map<String, dynamic> manifest = json.decode(manifestContent);
-  
-  for (String path in manifest.keys) {
-    if (path.startsWith('assets/models/')) {
-      final filename = path.split('/').last;
-      final bytes = await rootBundle.load(path);
-      final buffer = bytes.buffer;
-      await File('${modelsDir.path}/$filename')
-          .writeAsBytes(buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes));
+  try {
+    final appDir = await getApplicationDocumentsDirectory();
+    final modelsDir = Directory('${appDir.path}/assets/models');
+    
+    // Create the directory if it doesn't exist
+    if (!await modelsDir.exists()) {
+      await modelsDir.create(recursive: true);
     }
+
+    // List of model files to copy
+    final modelFiles = [
+      'assets/models/rep_fast_base.onnx',
+      'assets/models/crnn_mobilenet_v3_large.onnx',
+    ];
+
+    // Copy each model file
+    for (String assetPath in modelFiles) {
+      final filename = assetPath.split('/').last;
+      final targetFile = File('${modelsDir.path}/$filename');
+      
+      // Only copy if the file doesn't exist
+      if (!await targetFile.exists()) {
+        final byteData = await rootBundle.load(assetPath);
+        final buffer = byteData.buffer;
+        await targetFile.writeAsBytes(
+          buffer.asUint8List(
+            byteData.offsetInBytes,
+            byteData.lengthInBytes,
+          )
+        );
+        print('Copied $filename to documents directory');
+      }
+    }
+  } catch (e) {
+    print('Error copying models: $e');
+    throw Exception('Failed to copy models: $e');
   }
 }
 
