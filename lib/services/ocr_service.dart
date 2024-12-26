@@ -38,20 +38,20 @@ class OCRService {
       
       // Load detection model
       final detectionFile = '${appDir.path}/assets/models/rep_fast_base.onnx';
-      final rawdetectionFile = await rootBundle.load(detectionFile);
-      final detectionBytes = rawdetectionFile.buffer.asUint8List();
-      detectionModel = await OrtSession.fromBuffer(detectionBytes, sessionOptions);
+      final rawDetectionFile = await rootBundle.load(detectionFile);
+      final detectionBytes = rawDetectionFile.buffer.asUint8List();
+      detectionModel = OrtSession.fromBuffer(detectionBytes, sessionOptions);
       
       // Load recognition model
       final recognitionFile = '${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx';
-      final rawrecognitionFile = await rootBundle.load(recognitionFile);
-      final recognitionBytes = rawrecognitionFile.buffer.asUint8List();
-      recognitionModel = await OrtSession.fromBuffer(recognitionBytes, sessionOptions);
+      final rawRecognitionFile = await rootBundle.load(recognitionFile);
+      final recognitionBytes = rawRecognitionFile.buffer.asUint8List();
+      recognitionModel = OrtSession.fromBuffer(recognitionBytes, sessionOptions);
       
     } catch (e) {
       throw Exception('Error loading models: $e');
     }
-  }
+}
 
   Future<img_lib.Image?> uiImageToImage(ui.Image image) async {
     try {
@@ -105,37 +105,46 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
     try {
       final inputTensor = await preprocessImageForDetection(image);
       
-      // Create ONNX tensor with correct number of arguments
       final tensor = OrtValueTensor.createTensorWithDataList(
         inputTensor,
         [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]]
       );
 
       // Create input feeds map
-      final Map<String, OrtValue> feeds = {'input': tensor};
+      final Map<String, OrtValue> inputs = {'input': tensor};
       
-      // Create empty map for outputs
-      final Map<String, OrtValue> outputs = {};
+      // Create run options
+      final runOptions = OrtRunOptions();
 
-      // Run model inference with required arguments
-      await detectionModel!.run(feeds, outputs);
-      
-      // Get probability map from results
-      final outputTensor = outputs['output'];
-      if (outputTensor == null) {
-        throw Exception('No output found in model results');
+      try {
+        // Run model inference using runAsync
+        final outputs = await detectionModel?.runAsync(runOptions, inputs);
+        
+        if (outputs == null || outputs.isEmpty) {
+          throw Exception('No output from detection model');
+        }
+
+        final probMap = outputs[0]?.value as Float32List;
+        if (probMap == null) {
+          throw Exception('Invalid output tensor');
+        }
+        
+        final processedProbMap = Float32List.fromList(
+          probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList()
+        );
+
+        return {
+          'out_map': processedProbMap,
+          'preds': postprocessProbabilityMap(processedProbMap),
+        };
+      } finally {
+        // Cleanup resources
+        tensor.release();
+        runOptions.release();
+        outputs?.forEach((element) {
+          element?.release();
+        });
       }
-
-      final probMap = outputTensor.value as Float32List;
-      
-      final processedProbMap = Float32List.fromList(
-        probMap.map((x) => 1.0 / (1.0 + math.exp(-x))).toList() // Use math.exp
-      );
-
-      return {
-        'out_map': processedProbMap,
-        'preds': postprocessProbabilityMap(processedProbMap),
-      };
     } catch (e) {
       throw Exception('Error running detection model: $e');
     }
@@ -326,64 +335,72 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
     try {
       final preprocessedData = await preprocessImageForRecognition(crops);
       
-      // Create tensor with correct number of arguments
       final tensor = OrtValueTensor.createTensorWithDataList(
         preprocessedData,
         [crops.length, 3, OCRConstants.RECOGNITION_TARGET_SIZE[0], OCRConstants.RECOGNITION_TARGET_SIZE[1]]
       );
 
       // Create input feeds map
-      final Map<String, OrtValue> feeds = {'input': tensor};
+      final Map<String, OrtValue> inputs = {'input': tensor};
       
-      // Create empty map for outputs
-      final Map<String, OrtValue> outputs = {};
+      // Create run options
+      final runOptions = OrtRunOptions();
 
-      // Run model inference with required arguments
-      await recognitionModel!.run(feeds, outputs);
-      
-      // Get logits from results
-      final logitsValue = outputs['logits'];
-      if (logitsValue == null) {
-        throw Exception('No logits found in model output');
-      }
+      try {
+        // Run model inference using runAsync
+        final outputs = await recognitionModel?.runAsync(runOptions, inputs);
+        
+        if (outputs == null || outputs.isEmpty) {
+          throw Exception('No output from recognition model');
+        }
 
-      final logits = logitsValue.value as Float32List;
-      
-      // Use constants for dimensions if shape is not available
-      final batchSize = crops.length;
-      final height = OCRConstants.RECOGNITION_TARGET_SIZE[0];
-      final numClasses = OCRConstants.VOCAB.length + 1; // +1 for blank token
+        final logits = outputs[0]?.value as Float32List;
+        if (logits == null) {
+          throw Exception('Invalid output tensor');
+        }
 
-      // Process logits and apply softmax
-      final probabilities = List.generate(batchSize, (b) {
-        return List.generate(height, (h) {
-          final positionLogits = List.generate(numClasses, (c) {
-            final index = b * (height * numClasses) + h * numClasses + c;
-            return logits[index].toDouble();
+        final batchSize = crops.length;
+        final height = OCRConstants.RECOGNITION_TARGET_SIZE[0];
+        final numClasses = OCRConstants.VOCAB.length + 1; // +1 for blank token
+
+        // Process logits and apply softmax
+        final probabilities = List.generate(batchSize, (b) {
+          return List.generate(height, (h) {
+            final positionLogits = List.generate(numClasses, (c) {
+              final index = b * (height * numClasses) + h * numClasses + c;
+              return logits[index].toDouble();
+            });
+            return _softmax(positionLogits);
           });
-          return _softmax(positionLogits);
         });
-      });
 
-      // Find best path
-      final bestPath = probabilities.map((batchProb) {
-        return batchProb.map((row) {
-          return row.indexOf(row.reduce(math.max)); // Use math.max
+        // Find best path and decode text
+        final bestPath = probabilities.map((batchProb) {
+          return batchProb.map((row) {
+            return row.indexOf(row.reduce(math.max));
+          }).toList();
         }).toList();
-      }).toList();
 
-      final decodedTexts = bestPath.map((sequence) {
-        return sequence
-            .where((idx) => idx != numClasses - 1)
-            .map((idx) => OCRConstants.VOCAB[idx])
-            .join('');
-      }).toList();
+        final decodedTexts = bestPath.map((sequence) {
+          return sequence
+              .where((idx) => idx != numClasses - 1)
+              .map((idx) => OCRConstants.VOCAB[idx])
+              .join('');
+        }).toList();
 
-      return {
-        'probabilities': probabilities,
-        'bestPath': bestPath,
-        'decodedTexts': decodedTexts,
-      };
+        return {
+          'probabilities': probabilities,
+          'bestPath': bestPath,
+          'decodedTexts': decodedTexts,
+        };
+      } finally {
+        // Cleanup resources
+        tensor.release();
+        runOptions.release();
+        outputs?.forEach((element) {
+          element?.release();
+        });
+      }
     } catch (e) {
       throw Exception('Error running recognition model: $e');
     }
