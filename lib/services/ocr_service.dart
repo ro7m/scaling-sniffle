@@ -30,26 +30,34 @@ class OCRService {
   OrtSession? detectionModel;
   OrtSession? recognitionModel;
   
-  Future<void> loadModels() async {
-    try {
-      final sessionOptions = OrtSessionOptions();
-      final appDir = await getApplicationDocumentsDirectory();
-      
-      // Load detection model
-      final detectionFile = '${appDir.path}/assets/models/rep_fast_base.onnx';
-      final rawDetectionFile = await rootBundle.load(detectionFile);
-      final detectionBytes = rawDetectionFile.buffer.asUint8List();
-      detectionModel = OrtSession.fromBuffer(detectionBytes, sessionOptions);
-      
-      // Load recognition model
-      final recognitionFile = '${appDir.path}/assets/models/crnn_mobilenet_v3_large.onnx';
-      final rawRecognitionFile = await rootBundle.load(recognitionFile);
-      final recognitionBytes = rawRecognitionFile.buffer.asUint8List();
-      recognitionModel = OrtSession.fromBuffer(recognitionBytes, sessionOptions);
-      
-    } catch (e) {
-      throw Exception('Error loading models: $e');
-    }
+Future<void> loadModels() async {
+  try {
+    final sessionOptions = OrtSessionOptions();
+    
+    // Load detection model directly from assets
+    final detectionBytes = await rootBundle.load('assets/models/rep_fast_base.onnx');
+    detectionModel = OrtSession.fromBuffer(
+      detectionBytes.buffer.asUint8List(
+        detectionBytes.offsetInBytes,
+        detectionBytes.lengthInBytes
+      ),
+      sessionOptions
+    );
+    
+    // Load recognition model directly from assets
+    final recognitionBytes = await rootBundle.load('assets/models/crnn_mobilenet_v3_large.onnx');
+    recognitionModel = OrtSession.fromBuffer(
+      recognitionBytes.buffer.asUint8List(
+        recognitionBytes.offsetInBytes,
+        recognitionBytes.lengthInBytes
+      ),
+      sessionOptions
+    );
+    
+  } catch (e) {
+    print('Error loading models: $e'); // Debug print
+    throw Exception('Error loading models: $e');
+  }
 }
 
   Future<img_lib.Image?> uiImageToImage(ui.Image image) async {
