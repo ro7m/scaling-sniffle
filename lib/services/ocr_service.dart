@@ -116,9 +116,11 @@ Future<Map<String, dynamic>> detectText(ui.Image image) async {
       // Create run options
       final runOptions = OrtRunOptions();
 
+      List<OrtValue>? outputs;
+
       try {
         // Run model inference using runAsync
-        final outputs = await detectionModel?.runAsync(runOptions, inputs);
+        outputs = await detectionModel?.runAsync(runOptions, inputs);
         
         if (outputs == null || outputs.isEmpty) {
           throw Exception('No output from detection model');
@@ -345,10 +347,12 @@ Future<Map<String, dynamic>> recognizeText(List<ui.Image> crops) async {
       
       // Create run options
       final runOptions = OrtRunOptions();
+      
+      List<OrtValue>? outputs;
 
       try {
         // Run model inference using runAsync
-        final outputs = await recognitionModel?.runAsync(runOptions, inputs);
+         outputs = await recognitionModel?.runAsync(runOptions, inputs);
         
         if (outputs == null || outputs.isEmpty) {
           throw Exception('No output from recognition model');
