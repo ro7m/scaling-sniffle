@@ -63,14 +63,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                       ),
                       child: Container(),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      _extractedText,
-                      style: TextStyle(fontSize: 16),
-                    ),
-                  ),
+                  )
                 ],
               ),
       ),
