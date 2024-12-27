@@ -1,11 +1,11 @@
-import 'dart:ui' as ui;
+import 'dart:ui' as ui; // Ensure this import is present
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/ocr_result.dart';
 import '../models/bounding_box.dart';
 import 'dart:math' as math;
-import '../constants.dart'; // Import the constants
+import '../constants.dart'; // Ensure this import is correct
 
 // Helper class for bounding box calculation
 class _BBox {
@@ -71,13 +71,13 @@ class OCRService {
     final height = OCRConstants.TARGET_SIZE[1];
     
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
+    final canvas = ui.Canvas(recorder);
     
     canvas.drawImageRect(
       image,
-      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-      Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
-      Paint()
+      ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      ui.Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+      ui.Paint()
     );
     
     final picture = recorder.endRecording();
@@ -106,7 +106,7 @@ class OCRService {
   Future<Float32List> _runDetection(Float32List preprocessedImage) async {
     try {
       final feeds = {
-        'input': OrtTensor.fromTypedList(
+        'input': OrtValue.tensorFromTypedList(
           preprocessedImage,
           [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
         )
@@ -201,7 +201,7 @@ class OCRService {
   void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
-    final queue = <Point<int>>[Point(x, y)];
+    final queue = <math.Point<int>>[math.Point(x, y)];
     
     while (queue.isNotEmpty) {
       final point = queue.removeLast();
@@ -212,10 +212,10 @@ class OCRService {
         labels[py][px] = label;
         bbox.update(px, py);
         
-        queue.add(Point(px + 1, py));
-        queue.add(Point(px - 1, py));
-        queue.add(Point(px, py + 1));
-        queue.add(Point(px, py - 1));
+        queue.add(math.Point(px + 1, py));
+        queue.add(math.Point(px - 1, py));
+        queue.add(math.Point(px, py + 1));
+        queue.add(math.Point(px, py - 1));
       }
     }
   }
@@ -238,20 +238,20 @@ class OCRService {
     }
     
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
+    final canvas = ui.Canvas(recorder);
     
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()),
-      Paint()..color = ui.Color(0xFF000000),
+      ui.Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()),
+      ui.Paint()..color = ui.Color(0xFF000000),
     );
     
     final xOffset = (targetWidth - resizedWidth) / 2;
     final yOffset = (targetHeight - resizedHeight) / 2;
     canvas.drawImageRect(
       image,
-      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-      Rect.fromLTWH(xOffset, yOffset, resizedWidth, resizedHeight),
-      Paint(),
+      ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      ui.Rect.fromLTWH(xOffset, yOffset, resizedWidth, resizedHeight),
+      ui.Paint(),
     );
     
     final picture = recorder.endRecording();
@@ -280,7 +280,7 @@ class OCRService {
   Future<String> _recognizeText(Float32List preprocessedImage) async {
     try {
       final feeds = {
-        'input': OrtTensor.fromTypedList(
+        'input': OrtValue.tensorFromTypedList(
           preprocessedImage,
           [1, 3, OCRConstants.REC_TARGET_SIZE[0], OCRConstants.REC_TARGET_SIZE[1]],
         )
@@ -365,9 +365,9 @@ class OCRService {
   // Crop image to bounding box
   Future<ui.Image> _cropImage(ui.Image image, BoundingBox box) async {
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
+    final canvas = ui.Canvas(recorder);
     
-    final srcRect = Rect.fromLTWH(
+    final srcRect = ui.Rect.fromLTWH(
       box.x * image.width,
       box.y * image.height,
       box.width * image.width,
@@ -392,15 +392,15 @@ class OCRService {
     final yPad = (targetHeight - resizedHeight) / 2;
     
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, targetWidth, targetHeight),
-      Paint()..color = ui.Color(0xFF000000),
+      ui.Rect.fromLTWH(0, 0, targetWidth, targetHeight),
+      ui.Paint()..color = ui.Color(0xFF000000),
     );
     
     canvas.drawImageRect(
       image,
       srcRect,
-      Rect.fromLTWH(xPad, yPad, resizedWidth, resizedHeight),
-      Paint(),
+      ui.Rect.fromLTWH(xPad, yPad, resizedWidth, resizedHeight),
+      ui.Paint(),
     );
     
     final picture = recorder.endRecording();
