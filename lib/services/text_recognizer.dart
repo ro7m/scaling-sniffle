@@ -18,7 +18,7 @@ class TextRecognizer {
     inputOrt.release();
     runOptions.release();
 
-    final output = results.first.value;
+    final output = results?.first?.value;
     if (output == null) {
       throw Exception('Recognition model output is null');
     }
@@ -51,8 +51,8 @@ class TextRecognizer {
       prevIndex = index;
     }
 
-    results.forEach((element) {
-      element.release();
+    results?.forEach((element) {
+      element?.release();
     });
 
     return decodedText.toString();

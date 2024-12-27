@@ -11,6 +11,11 @@ class OCRService {
   final ImagePreprocessor imagePreprocessor = ImagePreprocessor();
   TextDetector? textDetector;
   TextRecognizer? textRecognizer;
+  void Function(String)? debugCallback;
+
+  set setDebugCallback(void Function(String)? callback) {
+    debugCallback = callback;
+  }
 
   Future<void> loadModels({void Function(String)? debugCallback}) async {
     await modelLoader.loadModels(debugCallback: debugCallback);
