@@ -18,6 +18,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   final OCRService _ocrService = OCRService();
   List<BoundingBox> _boundingBoxes = [];
   String _extractedText = '';
+  ui.Image? _decodedImage;
 
   @override
   void initState() {
@@ -35,8 +36,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
     final imageBytes = await widget.image.readAsBytes();
     final ui.Codec codec = await ui.instantiateImageCodec(imageBytes);
     final ui.FrameInfo frameInfo = await codec.getNextFrame();
-    final ui.Image image = frameInfo.image; // Decode the image
-    final results = await _ocrService.processImage(image, debugCallback: _addDebugMessage);
+    _decodedImage = frameInfo.image; // Decode the image
+    final results = await _ocrService.processImage(_decodedImage!, debugCallback: _addDebugMessage);
     setState(() {
       _boundingBoxes = results.map((r) => r.boundingBox).toList();
       _extractedText = results.map((r) => r.text).join('\n');
@@ -50,11 +51,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
         title: Text('OCR Preview'),
       ),
       body: Center(
-        child: _boundingBoxes.isEmpty
+        child: _boundingBoxes.isEmpty || _decodedImage == null
             ? CircularProgressIndicator()
             : CustomPaint(
                 painter: BoundingBoxPainter(
-                  image: image, // Pass the decoded image
+                  image: _decodedImage!, // Pass the decoded image
                   boundingBoxes: _boundingBoxes,
                 ),
                 child: Container(),
