@@ -5,7 +5,7 @@ import 'package:onnxruntime/onnxruntime.dart';
 import '../models/ocr_result.dart';
 import '../models/bounding_box.dart';
 import 'dart:math' as math;
-import '../constants.dart';
+import '../constants.dart'; // Ensure this import is correct
 
 // Helper class for bounding box calculation
 class _BBox {
@@ -118,36 +118,43 @@ class OCRService {
       if (output == null) {
         throw Exception('Detection model output is null');
       }
-      final List<dynamic> nestedOutput = output as List<dynamic>;
+      // Flatten the nested list into a Float32List
+      final flattenedOutput = _flattenNestedList(output as List);
 
       results?.forEach((element) {
         element?.release();
       });
 
-      return _convertToFloat32ListAndApplySigmoid(nestedOutput);
+      return _convertToFloat32ListAndApplySigmoid(flattenedOutput);
     } catch (e) {
       debugCallback?.call('Detection error: $e');
       throw Exception('Detection failed: $e');
     }
   }
 
-  // Convert nested output to Float32List and apply sigmoid
-  Float32List _convertToFloat32ListAndApplySigmoid(List<dynamic> nested) {
-    final flattened = <double>[];
-    
+  // Flatten a nested list into a Float32List
+  Float32List _flattenNestedList(List nestedList) {
+    final List<double> flattened = [];
     void flatten(dynamic item) {
       if (item is List) {
         for (var subItem in item) {
           flatten(subItem);
         }
       } else if (item is num) {
-        final sigmoid = 1.0 / (1.0 + math.exp(-item.toDouble()));
-        flattened.add(sigmoid);
+        flattened.add(item.toDouble());
       }
     }
-    
-    flatten(nested);
+    flatten(nestedList);
     return Float32List.fromList(flattened);
+  }
+
+  // Convert flattened output to Float32List and apply sigmoid
+  Float32List _convertToFloat32ListAndApplySigmoid(Float32List flattened) {
+    final Float32List result = Float32List(flattened.length);
+    for (int i = 0; i < flattened.length; i++) {
+      result[i] = 1.0 / (1.0 + math.exp(-flattened[i]));
+    }
+    return result;
   }
 
   // Extract bounding boxes
@@ -300,7 +307,9 @@ class OCRService {
       if (output == null) {
         throw Exception('Recognition model output is null');
       }
-      final logits = output as Float32List;
+      // Flatten the nested list into a Float32List
+      final logits = _flattenNestedList(output as List);
+
       final batchSize = 1;
       final height = OCRConstants.REC_TARGET_SIZE[0];
       final numClasses = OCRConstants.VOCAB.length;
