@@ -5,7 +5,7 @@ import 'package:onnxruntime/onnxruntime.dart';
 import '../models/ocr_result.dart';
 import '../models/bounding_box.dart';
 import 'dart:math' as math;
-import '../constants.dart'; 
+import '../constants.dart';
 
 // Helper class for bounding box calculation
 class _BBox {
@@ -114,12 +114,15 @@ class OCRService {
       inputOrt.release();
       runOptions.release();
 
+      final output = results?.first?.value;
+      if (output == null) {
+        throw Exception('Detection model output is null');
+      }
+      final List<dynamic> nestedOutput = output as List<dynamic>;
+
       results?.forEach((element) {
         element?.release();
       });
-
-      final output = results?.first.value;
-      final List<dynamic> nestedOutput = output as List<dynamic>;
 
       return _convertToFloat32ListAndApplySigmoid(nestedOutput);
     } catch (e) {
@@ -293,17 +296,14 @@ class OCRService {
       inputOrt.release();
       runOptions.release();
 
-      results?.forEach((element) {
-        element?.release();
-      });
-
-      final output = results?.first.value;
+      final output = results?.first?.value;
+      if (output == null) {
+        throw Exception('Recognition model output is null');
+      }
       final logits = output as Float32List;
-      final dims = output.dims;
-
-      final batchSize = dims[0];
-      final height = dims[1];
-      final numClasses = dims[2];
+      final batchSize = 1;
+      final height = OCRConstants.REC_TARGET_SIZE[0];
+      final numClasses = OCRConstants.VOCAB.length;
 
       List<double> softmax(List<double> logits) {
         final expLogits = logits.map((x) => math.exp(x)).toList();
@@ -327,6 +327,10 @@ class OCRService {
         }
         prevIndex = index;
       }
+
+      results?.forEach((element) {
+        element?.release();
+      });
 
       return decodedText.toString();
     } catch (e) {
