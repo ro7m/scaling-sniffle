@@ -1,10 +1,13 @@
 import 'dart:ui' as ui;
+import 'dart:typed_data';
 import '../models/ocr_result.dart';
 import '../models/bounding_box.dart';
 import 'model_loader.dart';
 import 'image_preprocessor.dart';
 import 'text_detector.dart';
 import 'text_recognizer.dart';
+import 'dart:math' as math;
+import '../constants.dart';
 
 class OCRService {
   final ModelLoader modelLoader = ModelLoader();
@@ -42,7 +45,7 @@ class OCRService {
       }
 
       // Transform bounding boxes to original image coordinates
-      final transformedBoundingBoxes = transformBoundingBoxes(boundingBoxes, image.width, image.height, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]);
+      final transformedBoundingBoxes = boundingBoxes.map((box) => transformBoundingBox(box, 0, [image.height, image.width])).toList();
 
       final results = <OCRResult>[];
       for (var box in transformedBoundingBoxes) {
@@ -67,10 +70,10 @@ class OCRService {
     final canvas = ui.Canvas(recorder);
 
     final srcRect = ui.Rect.fromLTWH(
-      box.x,
-      box.y,
-      box.width,
-      box.height,
+      box.x * image.width,
+      box.y * image.height,
+      box.width * image.width,
+      box.height * image.height,
     );
 
     const targetHeight = 32.0;
@@ -104,16 +107,5 @@ class OCRService {
 
     final picture = recorder.endRecording();
     return await picture.toImage(targetWidth.toInt(), targetHeight.toInt());
-  }
-
-  List<BoundingBox> transformBoundingBoxes(List<BoundingBox> boxes, int originalWidth, int originalHeight, int targetWidth, int targetHeight) {
-    return boxes.map((box) {
-      return BoundingBox(
-        x: box.x * originalWidth / targetWidth,
-        y: box.y * originalHeight / targetHeight,
-        width: box.width * originalWidth / targetWidth,
-        height: box.height * originalHeight / targetHeight,
-      );
-    }).toList();
   }
 }
