@@ -13,6 +13,10 @@ class BoundingBox {
     required this.height,
   });
 
+double clamp(double number, double size) {
+  return math.max(0, math.min(number, size));
+}
+
   BoundingBox transformBoundingBox(BoundingBox contour, int id, List<int> size) {
   double offset = (contour.width * contour.height * 1.8) / (2 * (contour.width + contour.height));
   double p1 = clamp(contour.x - offset, size[1].toDouble()) - 1;
@@ -26,4 +30,5 @@ class BoundingBox {
     width: (p2 - p1) / size[1],
     height: (p4 - p3) / size[0],
   );
+}
 }

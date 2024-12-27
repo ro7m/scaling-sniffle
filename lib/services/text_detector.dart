@@ -160,7 +160,7 @@ Future<ui.Image> createHeatmapFromProbMap(Float32List probMap, int width, int he
     }
   }));
 
-  final codec = await ui.instantiateImageCodec(imageBytes, width: width, height: height, format: ui.PixelFormat.rgba8888);
+  final codec = await ui.instantiateImageCodec(imageBytes, targetWidth: width, targetHeight: height);
   final frame = await codec.getNextFrame();
   final image = frame.image;
 
