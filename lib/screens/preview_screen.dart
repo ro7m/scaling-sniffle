@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui; // Import dart:ui with an alias
+import 'package:camera/camera.dart'; // Import Camera library
 import '../services/ocr_service.dart';
 import '../models/bounding_box.dart';
 import '../services/bounding_box_painter.dart';
 
 class PreviewScreen extends StatefulWidget {
-  final ui.Image image;
+  final XFile image; // Use XFile to match the captured image type
 
   PreviewScreen({required this.image});
 
@@ -31,7 +32,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   Future<void> _processImage() async {
     await _ocrService.loadModels(debugCallback: _addDebugMessage);
-    final results = await _ocrService.processImage(widget.image, debugCallback: _addDebugMessage);
+    final imageBytes = await widget.image.readAsBytes();
+    final ui.Codec codec = await ui.instantiateImageCodec(imageBytes);
+    final ui.FrameInfo frameInfo = await codec.getNextFrame();
+    final ui.Image image = frameInfo.image; // Decode the image
+    final results = await _ocrService.processImage(image, debugCallback: _addDebugMessage);
     setState(() {
       _boundingBoxes = results.map((r) => r.boundingBox).toList();
       _extractedText = results.map((r) => r.text).join('\n');
@@ -45,13 +50,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
         title: Text('OCR Preview'),
       ),
       body: Center(
-        child: CustomPaint(
-          painter: BoundingBoxPainter(
-            image: widget.image,
-            boundingBoxes: _boundingBoxes,
-          ),
-          child: Container(),
-        ),
+        child: _boundingBoxes.isEmpty
+            ? CircularProgressIndicator()
+            : CustomPaint(
+                painter: BoundingBoxPainter(
+                  image: widget.image, // Pass the decoded image
+                  boundingBoxes: _boundingBoxes,
+                ),
+                child: Container(),
+              ),
       ),
     );
   }
