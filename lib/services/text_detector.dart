@@ -71,7 +71,7 @@ class TextDetector {
     return result;
   }
 
-  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
+  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap, {void Function(String)? debugCallback}) async {
     final List<BoundingBox> boxes = [];
     final threshold = 0.1;
     final width = OCRConstants.TARGET_SIZE[0];
@@ -121,6 +121,7 @@ class TextDetector {
       }
     }
 
+    debugCallback?.call('Found ${boxes.length} bounding boxes');
     return boxes;
   }
 
