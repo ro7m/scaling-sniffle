@@ -1,11 +1,11 @@
-import 'dart:ui' as ui; // Ensure this import is present
+import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/ocr_result.dart';
 import '../models/bounding_box.dart';
 import 'dart:math' as math;
-import '../constants.dart'; // Ensure this import is correct
+import '../constants.dart'; 
 
 // Helper class for bounding box calculation
 class _BBox {
@@ -105,17 +105,22 @@ class OCRService {
   // Run detection model
   Future<Float32List> _runDetection(Float32List preprocessedImage) async {
     try {
-      final feeds = {
-        'input': OrtValue.tensorFromTypedList(
-          preprocessedImage,
-          [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
-        )
-      };
+      final shape = [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]];
+      final inputOrt = OrtValueTensor.createTensorWithDataList(preprocessedImage, shape);
+      final inputs = {'input': inputOrt};
+      final runOptions = OrtRunOptions();
 
-      final results = await detectionModel!.run(feeds);
-      final output = results.values.first;
-      final List<dynamic> nestedOutput = output.data as List<dynamic>;
-      
+      final results = await detectionModel?.runAsync(runOptions, inputs);
+      inputOrt.release();
+      runOptions.release();
+
+      results?.forEach((element) {
+        element?.release();
+      });
+
+      final output = results?.first.value;
+      final List<dynamic> nestedOutput = output as List<dynamic>;
+
       return _convertToFloat32ListAndApplySigmoid(nestedOutput);
     } catch (e) {
       debugCallback?.call('Detection error: $e');
@@ -279,16 +284,21 @@ class OCRService {
   // Recognize text from preprocessed image
   Future<String> _recognizeText(Float32List preprocessedImage) async {
     try {
-      final feeds = {
-        'input': OrtValue.tensorFromTypedList(
-          preprocessedImage,
-          [1, 3, OCRConstants.REC_TARGET_SIZE[0], OCRConstants.REC_TARGET_SIZE[1]],
-        )
-      };
+      final shape = [1, 3, OCRConstants.REC_TARGET_SIZE[0], OCRConstants.REC_TARGET_SIZE[1]];
+      final inputOrt = OrtValueTensor.createTensorWithDataList(preprocessedImage, shape);
+      final inputs = {'input': inputOrt};
+      final runOptions = OrtRunOptions();
 
-      final results = await recognitionModel!.run(feeds);
-      final output = results['logits'] as OrtTensor;
-      final logits = output.toFloat32List();
+      final results = await recognitionModel?.runAsync(runOptions, inputs);
+      inputOrt.release();
+      runOptions.release();
+
+      results?.forEach((element) {
+        element?.release();
+      });
+
+      final output = results?.first.value;
+      final logits = output as Float32List;
       final dims = output.dims;
 
       final batchSize = dims[0];
