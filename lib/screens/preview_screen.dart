@@ -54,7 +54,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
             ? CircularProgressIndicator()
             : CustomPaint(
                 painter: BoundingBoxPainter(
-                  image: widget.image, // Pass the decoded image
+                  image: image, // Pass the decoded image
                   boundingBoxes: _boundingBoxes,
                 ),
                 child: Container(),
