@@ -4,6 +4,22 @@ import 'package:onnxruntime/onnxruntime.dart';
 import '../models/bounding_box.dart';
 import '../constants.dart';
 
+class _BBox {
+  int minX = 999999, minY = 999999;
+  int maxX = -1, maxY = -1;
+
+  void update(int x, int y) {
+    minX = math.min(minX, x);
+    minY = math.min(minY, y);
+    maxX = math.max(maxX, x);
+    maxY = math.max(maxY, y);
+  }
+
+  bool isValid() {
+    return maxX >= 0 && maxY >= 0 && maxX > minX && maxY > minY;
+  }
+}
+
 class TextDetector {
   final OrtSession detectionModel;
 

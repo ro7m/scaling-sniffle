@@ -10,11 +10,4 @@ class BoundingBox {
     required this.width,
     required this.height,
   });
-
-  Map<String, dynamic> toJson() => {
-    'x': x,
-    'y': y,
-    'width': width,
-    'height': height,
-  };
 }
