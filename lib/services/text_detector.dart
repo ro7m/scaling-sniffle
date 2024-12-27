@@ -45,7 +45,7 @@ class TextDetector {
       element?.release();
     });
 
-    return _convertToFloat32ListAndApplySigmoid(flattenedOutput);
+    return createHeatmapFromProbMap(flattenedOutput, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]);
   }
 
   Float32List _flattenNestedList(List nestedList) {
@@ -61,14 +61,6 @@ class TextDetector {
     }
     flatten(nestedList);
     return Float32List.fromList(flattened);
-  }
-
-  Float32List _convertToFloat32ListAndApplySigmoid(Float32List flattened) {
-    final Float32List result = Float32List(flattened.length);
-    for (int i = 0; i < flattened.length; i++) {
-      result[i] = 1.0 / (1.0 + math.exp(-flattened[i]));
-    }
-    return result;
   }
 
   Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap, {void Function(String)? debugCallback}) async {

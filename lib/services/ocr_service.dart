@@ -34,15 +34,18 @@ class OCRService {
       final detectionResult = await textDetector!.runDetection(preprocessedImage);
       debugCallback?.call('Detection completed');
 
-      final boundingBoxes = await textDetector!.extractBoundingBoxes(detectionResult);
+      final boundingBoxes = await textDetector!.extractBoundingBoxes(detectionResult, debugCallback: debugCallback);
       debugCallback?.call('Found ${boundingBoxes.length} bounding boxes');
 
       if (boundingBoxes.isEmpty) {
         return [];
       }
 
+      // Transform bounding boxes to original image coordinates
+      final transformedBoundingBoxes = transformBoundingBoxes(boundingBoxes, image.width, image.height, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]);
+
       final results = <OCRResult>[];
-      for (var box in boundingBoxes) {
+      for (var box in transformedBoundingBoxes) {
         final croppedImage = await _cropImage(image, box);
         final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
         final text = await textRecognizer!.recognizeText(preprocessedCrop);
@@ -64,10 +67,10 @@ class OCRService {
     final canvas = ui.Canvas(recorder);
 
     final srcRect = ui.Rect.fromLTWH(
-      box.x * image.width,
-      box.y * image.height,
-      box.width * image.width,
-      box.height * image.height,
+      box.x,
+      box.y,
+      box.width,
+      box.height,
     );
 
     const targetHeight = 32.0;
