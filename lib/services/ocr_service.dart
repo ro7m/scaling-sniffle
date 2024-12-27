@@ -105,4 +105,15 @@ class OCRService {
     final picture = recorder.endRecording();
     return await picture.toImage(targetWidth.toInt(), targetHeight.toInt());
   }
+
+  List<BoundingBox> transformBoundingBoxes(List<BoundingBox> boxes, int originalWidth, int originalHeight, int targetWidth, int targetHeight) {
+    return boxes.map((box) {
+      return BoundingBox(
+        x: box.x * originalWidth / targetWidth,
+        y: box.y * originalHeight / targetHeight,
+        width: box.width * originalWidth / targetWidth,
+        height: box.height * originalHeight / targetHeight,
+      );
+    }).toList();
+  }
 }

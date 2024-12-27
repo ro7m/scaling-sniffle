@@ -45,7 +45,7 @@ class TextDetector {
       element?.release();
     });
 
-    return createHeatmapFromProbMap(flattenedOutput, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]);
+    return Float32List.fromList(flattenedOutput);
   }
 
   Float32List _flattenNestedList(List nestedList) {
@@ -138,4 +138,31 @@ class TextDetector {
       }
     }
   }
+}
+
+Future<ui.Image> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  final paint = ui.Paint();
+  final imageBytes = Uint8List.fromList(List.generate(width * height * 4, (i) {
+    final index = i ~/ 4;
+    final pixelValue = (probMap[index] * 255).round();
+    switch (i % 4) {
+      case 0:
+      case 1:
+      case 2:
+        return pixelValue; // R, G, B
+      case 3:
+        return 255; // A
+      default:
+        return 0;
+    }
+  }));
+
+  final codec = await ui.instantiateImageCodec(imageBytes, width: width, height: height, format: ui.PixelFormat.rgba8888);
+  final frame = await codec.getNextFrame();
+  final image = frame.image;
+
+  canvas.drawImage(image, ui.Offset.zero, paint);
+  return recorder.endRecording().toImage(width, height);
 }
