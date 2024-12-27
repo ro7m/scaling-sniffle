@@ -5,9 +5,9 @@ import 'package:onnxruntime/onnxruntime.dart';
 import '../models/ocr_result.dart';
 import '../models/bounding_box.dart';
 import 'dart:math' as math;
-import '../constants.dart'; 
+import '../constants.dart'; // Import the constants
 
-
+// Helper class for bounding box calculation
 class _BBox {
   int minX = 999999, minY = 999999;
   int maxX = -1, maxY = -1;
@@ -67,8 +67,8 @@ class OCRService {
   // Preprocess image for detection
   Future<Float32List> _preprocessImageForDetection(ui.Image image) async {
     debugCallback?.call('Preprocessing image for detection...');
-    final width = TARGET_SIZE[0];
-    final height = TARGET_SIZE[1];
+    final width = OCRConstants.TARGET_SIZE[0];
+    final height = OCRConstants.TARGET_SIZE[1];
     
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
@@ -93,9 +93,9 @@ class OCRService {
     
     for (int i = 0; i < pixels.length; i += 4) {
       final int idx = i ~/ 4;
-      preprocessedData[idx] = (pixels[i] / 255.0 - DET_MEAN[0]) / DET_STD[0]; // R
-      preprocessedData[idx + width * height] = (pixels[i + 1] / 255.0 - DET_MEAN[1]) / DET_STD[1]; // G
-      preprocessedData[idx + 2 * width * height] = (pixels[i + 2] / 255.0 - DET_MEAN[2]) / DET_STD[2]; // B
+      preprocessedData[idx] = (pixels[i] / 255.0 - OCRConstants.DET_MEAN[0]) / OCRConstants.DET_STD[0]; // R
+      preprocessedData[idx + width * height] = (pixels[i + 1] / 255.0 - OCRConstants.DET_MEAN[1]) / OCRConstants.DET_STD[1]; // G
+      preprocessedData[idx + 2 * width * height] = (pixels[i + 2] / 255.0 - OCRConstants.DET_MEAN[2]) / OCRConstants.DET_STD[2]; // B
     }
     
     debugCallback?.call('Image preprocessing for detection completed');
@@ -108,7 +108,7 @@ class OCRService {
       final feeds = {
         'input': OrtTensor.fromTypedList(
           preprocessedImage,
-          [1, 3, TARGET_SIZE[0], TARGET_SIZE[1]],
+          [1, 3, OCRConstants.TARGET_SIZE[0], OCRConstants.TARGET_SIZE[1]],
         )
       };
 
@@ -146,8 +146,8 @@ class OCRService {
   Future<List<BoundingBox>> _extractBoundingBoxes(Float32List probMap) async {
     final List<BoundingBox> boxes = [];
     final threshold = 0.1;
-    final width = TARGET_SIZE[0];
-    final height = TARGET_SIZE[1];
+    final width = OCRConstants.TARGET_SIZE[0];
+    final height = OCRConstants.TARGET_SIZE[1];
     
     List<List<bool>> binaryMap = List.generate(
       height,
@@ -199,8 +199,8 @@ class OCRService {
 
   // Flood fill algorithm for connected components labeling
   void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
-    final width = TARGET_SIZE[0];
-    final height = TARGET_SIZE[1];
+    final width = OCRConstants.TARGET_SIZE[0];
+    final height = OCRConstants.TARGET_SIZE[1];
     final queue = <Point<int>>[Point(x, y)];
     
     while (queue.isNotEmpty) {
@@ -223,8 +223,8 @@ class OCRService {
   // Preprocess image for recognition
   Future<Float32List> _preprocessImageForRecognition(ui.Image image) async {
     debugCallback?.call('Preprocessing image for recognition...');
-    final targetHeight = REC_TARGET_SIZE[0];
-    final targetWidth = REC_TARGET_SIZE[1];
+    final targetHeight = OCRConstants.REC_TARGET_SIZE[0];
+    final targetWidth = OCRConstants.REC_TARGET_SIZE[1];
     
     double resizedWidth, resizedHeight;
     final aspectRatio = targetWidth / targetHeight;
@@ -267,9 +267,9 @@ class OCRService {
     
     for (int i = 0; i < pixels.length; i += 4) {
       final int idx = i ~/ 4;
-      preprocessedData[idx] = (pixels[i] / 255.0 - REC_MEAN[0]) / REC_STD[0]; // R
-      preprocessedData[idx + targetWidth * targetHeight] = (pixels[i + 1] / 255.0 - REC_MEAN[1]) / REC_STD[1]; // G
-      preprocessedData[idx + 2 * targetWidth * targetHeight] = (pixels[i + 2] / 255.0 - REC_MEAN[2]) / REC_STD[2]; // B
+      preprocessedData[idx] = (pixels[i] / 255.0 - OCRConstants.REC_MEAN[0]) / OCRConstants.REC_STD[0]; // R
+      preprocessedData[idx + targetWidth * targetHeight] = (pixels[i + 1] / 255.0 - OCRConstants.REC_MEAN[1]) / OCRConstants.REC_STD[1]; // G
+      preprocessedData[idx + 2 * targetWidth * targetHeight] = (pixels[i + 2] / 255.0 - OCRConstants.REC_MEAN[2]) / OCRConstants.REC_STD[2]; // B
     }
     
     debugCallback?.call('Image preprocessing for recognition completed');
@@ -282,7 +282,7 @@ class OCRService {
       final feeds = {
         'input': OrtTensor.fromTypedList(
           preprocessedImage,
-          [1, 3, REC_TARGET_SIZE[0], REC_TARGET_SIZE[1]],
+          [1, 3, OCRConstants.REC_TARGET_SIZE[0], OCRConstants.REC_TARGET_SIZE[1]],
         )
       };
 
@@ -313,7 +313,7 @@ class OCRService {
       int prevIndex = -1;
       for (final index in bestPath) {
         if (index != numClasses - 1 && index != prevIndex) {
-          decodedText.write(VOCAB[index]);
+          decodedText.write(OCRConstants.VOCAB[index]);
         }
         prevIndex = index;
       }
@@ -362,6 +362,7 @@ class OCRService {
     }
   }
 
+  // Crop image to bounding box
   Future<ui.Image> _cropImage(ui.Image image, BoundingBox box) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
@@ -392,7 +393,7 @@ class OCRService {
     
     canvas.drawRect(
       Rect.fromLTWH(0, 0, targetWidth, targetHeight),
-      Paint()..color = Colors.black,
+      Paint()..color = ui.Color(0xFF000000),
     );
     
     canvas.drawImageRect(
