@@ -1,5 +1,4 @@
 import 'dart:ui' as ui;
-import 'package:opencv_dart/opencv_dart.dart' as cv;
 import 'model_loader.dart';
 import 'image_preprocessor.dart';
 import 'text_detector.dart';
@@ -19,7 +18,6 @@ class OCRService {
   }
 
   Future<void> loadModels({void Function(String)? debugCallback}) async {
-    await cv.initOpenCV();
     await modelLoader.loadModels(debugCallback: debugCallback);
     textDetector = TextDetector(modelLoader.detectionModel!);
     textRecognizer = TextRecognizer(modelLoader.recognitionModel!);

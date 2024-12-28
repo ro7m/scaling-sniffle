@@ -67,76 +67,106 @@ class TextDetector {
     return imageBytes;
   }
 
-  Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(Uint8List heatmapBytes, List<int> size) async {
+    Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(Uint8List heatmapBytes, List<int> size) async {
     try {
       // Create the image matrix from bytes
-      final input = {
-        "data": heatmapBytes,
-        "width": size[1],
-        "height": size[0],
-        "type": cv.CV_8UC1
-      };
+      cv.Mat src = cv.Mat.create(
+        size[0],  // height
+        size[1],  // width
+        cv.MatType.cv8UC1
+      );
+      src.setDataWithBytes(heatmapBytes);
 
+      // Create destination matrix for threshold
+      cv.Mat thresholded = cv.Mat.create(size[0], size[1], cv.MatType.cv8UC1);
+      
       // Apply threshold
-      final thresholded = await cv.threshold(input, {
-        "thresh": 77,
-        "maxval": 255,
-        "type": cv.THRESH_BINARY
-      });
+      double thresh = cv.Imgproc.threshold(
+        src,                    // src
+        thresholded,           // dst
+        77,                    // thresh value
+        255,                   // maxval
+        cv.ThresholdTypes.binary // threshold type
+      );
 
-      // Create structuring element for morphology
-      final morphKernel = await cv.getStructuringElement({
-        "shape": cv.MORPH_RECT,
-        "ksize": [2, 2]
-      });
+      // Create structuring element
+      cv.Mat kernel = cv.Imgproc.getStructuringElement(
+        cv.MorphShapes.rect,   // shape
+        cv.Size(2, 2)         // kernel size
+      );
 
+      // Create output Mat for morphology
+      cv.Mat opened = cv.Mat.create(size[0], size[1], cv.MatType.cv8UC1);
+      
       // Apply morphological opening
-      final opened = await cv.morphologyEx({
-        "src": thresholded,
-        "op": cv.MORPH_OPEN,
-        "kernel": morphKernel
-      });
+      cv.Imgproc.morphologyEx(
+        thresholded,           // src
+        opened,                // dst
+        cv.MorphTypes.open,    // operation type
+        kernel                 // kernel
+      );
 
       // Find contours
-      final contoursResult = await cv.findContours({
-        "image": opened,
-        "mode": cv.RETR_EXTERNAL,
-        "method": cv.CHAIN_APPROX_SIMPLE
-      });
+      List<cv.MatVector> contours = [];
+      cv.Mat hierarchy = cv.Mat.create(1, 1, cv.MatType.cv32SC4);
+      
+      cv.Imgproc.findContours(
+        opened,                              // image
+        contours,                            // contours
+        hierarchy,                           // hierarchy
+        cv.RetrievalModes.external,         // mode
+        cv.ContourApproximationModes.simple // method
+      );
 
       final List<BoundingBox> boundingBoxes = [];
 
       // Process contours
-      for (final contour in contoursResult['contours']) {
-        final rect = await cv.boundingRect({
-          "points": contour
-        });
+      for (var contour in contours) {
+        cv.Rect rect = cv.Imgproc.boundingRect(contour);
         
-        if (rect['width'] > 2 && rect['height'] > 2) {
-          // Insert at the beginning of the list (equivalent to unshift)
-          boundingBoxes.insert(0, await transformBoundingBox(rect, boundingBoxes.length, size));
+        // Access rect properties directly using dot notation
+        if (rect.width > 2 && rect.height > 2) {
+          boundingBoxes.insert(0, await transformBoundingBox(
+            // Create a map with the rect properties
+            {
+              'x': rect.x,
+              'y': rect.y,
+              'width': rect.width,
+              'height': rect.height
+            }, 
+            boundingBoxes.length, 
+            size
+          ));
         }
       }
 
+      // Clean up resources
+      src.release();
+      thresholded.release();
+      kernel.release();
+      opened.release();
+      hierarchy.release();
+      for (var contour in contours) {
+        contour.release();
+      }
+
       return boundingBoxes;
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('OpenCV Error: $e');
+      print('Stack trace: $stackTrace');
       throw Exception('Failed to process image with OpenCV: $e');
     }
   }
 
-
-    Future<BoundingBox> transformBoundingBox(Map<String, dynamic> contour, int id, List<int> size) async {
-    double offset = (contour['width'] * contour['height'] * 1.8) / 
-                   (2 * (contour['width'] + contour['height']));
+  Future<BoundingBox> transformBoundingBox(Map<String, dynamic> rectData, int id, List<int> size) async {
+    double offset = (rectData['width'] * rectData['height'] * 1.8) / 
+                   (2 * (rectData['width'] + rectData['height']));
     
-    // Match exactly with JavaScript implementation
-    double p1 = clamp(contour['x'] - offset, size[1].toDouble()) - 1;
-    double p2 = clamp(p1 + contour['width'] + 2 * offset, size[1].toDouble()) - 1;
-    double p3 = clamp(contour['y'] - offset, size[0].toDouble()) - 1;
-    double p4 = clamp(p3 + contour['height'] + 2 * offset, size[0].toDouble()) - 1;
+    double p1 = clamp(rectData['x'] - offset, size[1].toDouble()) - 1;
+    double p2 = clamp(p1 + rectData['width'] + 2 * offset, size[1].toDouble()) - 1;
+    double p3 = clamp(rectData['y'] - offset, size[0].toDouble()) - 1;
+    double p4 = clamp(p3 + rectData['height'] + 2 * offset, size[0].toDouble()) - 1;
 
-    // Create coordinates array exactly like JavaScript version
     List<List<double>> coordinates = [
       [p1 / size[1], p3 / size[0]],
       [p2 / size[1], p3 / size[0]],
@@ -144,7 +174,6 @@ class TextDetector {
       [p1 / size[1], p4 / size[0]],
     ];
 
-    // Let's modify our BoundingBox class to include all the JavaScript properties
     return BoundingBox(
       id: id,
       x: coordinates[0][0],
