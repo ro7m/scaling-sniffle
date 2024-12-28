@@ -124,6 +124,65 @@ class TextDetector {
     return boxes;
   }
 
+    Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
+    // Create RGBA byte array (4 bytes per pixel)
+    final bytes = Uint8List(width * height * 4);
+    
+    for (int i = 0; i < probMap.length; i++) {
+      final pixelValue = (probMap[i] * 255).round();
+      final j = i * 4;
+      bytes[j] = pixelValue;     // R
+      bytes[j + 1] = pixelValue; // G
+      bytes[j + 2] = pixelValue; // B
+      bytes[j + 3] = 255;        // A
+    }
+    
+    return bytes;
+  }
+
+    Float32List postprocessProbabilityMap(Float32List probMap) {
+    const threshold = 0.1;
+    return Float32List.fromList(
+      probMap.map((prob) => prob > threshold ? 1.0 : 0.0).toList()
+    );
+  }
+
+  String getRandomColor() {
+    return '#${(math.Random().nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
+  }
+
+  double clamp(double value, double max) {
+    return math.max(0, math.min(value, max));
+  }
+
+  Future<BoundingBox> transformBoundingBox(Map<String, dynamic> contour, int id, List<int> size) async {
+    double offset = (contour['width'] * contour['height'] * 1.8) / 
+                   (2 * (contour['width'] + contour['height']));
+    
+    double p1 = clamp(contour['x'] - offset, size[1].toDouble()) - 1;
+    double p2 = clamp(p1 + contour['width'] + 2 * offset, size[1].toDouble()) - 1;
+    double p3 = clamp(contour['y'] - offset, size[0].toDouble()) - 1;
+    double p4 = clamp(p3 + contour['height'] + 2 * offset, size[0].toDouble()) - 1;
+
+    List<List<double>> coordinates = [
+      [p1 / size[1], p3 / size[0]],
+      [p2 / size[1], p3 / size[0]],
+      [p2 / size[1], p4 / size[0]],
+      [p1 / size[1], p4 / size[0]],
+    ];
+
+    return BoundingBox(
+      id: id,
+      x: coordinates[0][0],
+      y: coordinates[0][1],
+      width: coordinates[1][0] - coordinates[0][0],
+      height: coordinates[2][1] - coordinates[0][1],
+      coordinates: coordinates,
+      config: {"stroke": getRandomColor()},
+    );
+  }
+
+
   void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
@@ -144,5 +203,35 @@ class TextDetector {
         queue.add(math.Point(px, py - 1));
       }
     }
+  }
+
+    Future<List<BoundingBox>> processImage(Float32List probMap) async {
+    final width = OCRConstants.TARGET_SIZE[0];
+    final height = OCRConstants.TARGET_SIZE[1];
+
+    // Create heatmap
+    final heatmapBytes = await createHeatmapFromProbMap(probMap, width, height);
+    
+    // Extract bounding boxes using the existing method but with transformed boxes
+    final initialBoxes = await extractBoundingBoxes(probMap);
+    
+    // Transform the boxes and add IDs and styling
+    List<BoundingBox> transformedBoxes = [];
+    for (int i = 0; i < initialBoxes.length; i++) {
+      BoundingBox box = initialBoxes[i];
+      Map<String, dynamic> contour = {
+        'x': (box.x * width).round(),
+        'y': (box.y * height).round(),
+        'width': (box.width * width).round(),
+        'height': (box.height * height).round(),
+      };
+      
+      // Transform and add to the beginning of the list (unshift equivalent)
+      transformedBoxes.insert(0, 
+        await transformBoundingBox(contour, transformedBoxes.length, [height, width])
+      );
+    }
+
+    return transformedBoxes;
   }
 }

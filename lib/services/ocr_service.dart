@@ -34,7 +34,7 @@ class OCRService {
       final detectionResult = await textDetector!.runDetection(preprocessedImage);
       debugCallback?.call('Detection completed');
 
-      final boundingBoxes = await textDetector!.extractBoundingBoxes(detectionResult);
+      final boundingBoxes = await textDetector.processImage(detectionResult);
       debugCallback?.call('Found ${boundingBoxes.length} bounding boxes');
 
       if (boundingBoxes.isEmpty) {
