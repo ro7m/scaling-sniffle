@@ -19,7 +19,7 @@ class OCRService {
   }
 
   Future<void> loadModels({void Function(String)? debugCallback}) async {
-    await cv.initOpenCV();
+    await cv.Core.initOpenCV();
     await modelLoader.loadModels(debugCallback: debugCallback);
     textDetector = TextDetector(modelLoader.detectionModel!);
     textRecognizer = TextRecognizer(modelLoader.recognitionModel!);
