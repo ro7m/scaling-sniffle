@@ -6,11 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'package:opencv_4/opencv_4.dart' as cv;
+
 
 Future<void> main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
     final cameras = await availableCameras();
+    await cv.Cv2.initOpenCV();
+
     if (cameras.isEmpty) {
       print('No cameras found');
       runApp(const MyAppError(error: 'No cameras available'));

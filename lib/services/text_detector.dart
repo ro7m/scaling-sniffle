@@ -1,26 +1,10 @@
-import 'package:image/image.dart' as img;
 import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'dart:math' as math;
+import 'package:opencv_4/opencv_4.dart' as cv;
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/bounding_box.dart';
 import '../constants.dart';
-
-class _BBox {
-  int minX = 999999, minY = 999999;
-  int maxX = -1, maxY = -1;
-
-  void update(int x, int y) {
-    minX = math.min(minX, x);
-    minY = math.min(minY, y);
-    maxX = math.max(maxX, x);
-    maxY = math.max(maxY, y);
-  }
-
-  bool isValid() {
-    return maxX >= 0 && maxY >= 0 && maxX > minX && maxY > minY;
-  }
-}
 
 class TextDetector {
   final OrtSession detectionModel;
@@ -50,111 +34,6 @@ class TextDetector {
     return Float32List.fromList(flattenedOutput);
   }
 
-  Future<List<BoundingBox>> processDetectionOutput(Float32List probMap) async {
-    final width = OCRConstants.TARGET_SIZE[0];
-    final height = OCRConstants.TARGET_SIZE[1];
-    
-    // 1. Convert probability map to heatmap image
-    final heatmapImage = await createHeatmapFromProbMap(probMap, width, height);
-    
-    // 2. Process the heatmap to extract bounding boxes
-    return extractBoundingBoxesFromHeatmap(heatmapImage, width, height);
-  }
-
-  Future<img.Image> createHeatmapFromProbMap(Float32List probMap, int width, int height) {
-    // Create a grayscale image from probability map
-    final image = img.Image(width: width, height: height);
-    
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        final prob = probMap[y * width + x];
-        final pixelValue = (prob * 255).round();
-        image.setPixel(x, y, img.ColorRgb8(pixelValue, pixelValue, pixelValue));
-      }
-    }
-    
-    return Future.value(image);
-  }
-
-  Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(img.Image heatmap, int width, int height) async {
-    // 1. Convert to grayscale if not already
-    final grayscale = img.grayscale(heatmap);
-    
-    // 2. Apply threshold (similar to cv.threshold in JS version)
-    final binary = img.binarize(grayscale, threshold: 77);
-    
-    // 3. Apply morphological opening (similar to cv.morphologyEx)
-    final opened = img.morphologyEx(
-      binary,
-      img.kernelCross(2), // 2x2 kernel
-      img.MorphologyOperation.open
-    );
-    
-    // 4. Find contours (we'll use connected components as an alternative)
-    final List<BoundingBox> boundingBoxes = [];
-    final visited = List.generate(height, (_) => List.filled(width, false));
-    
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        if (!visited[y][x] && opened.getPixel(x, y) == img.ColorRgb8(255, 255, 255)) {
-          final contour = _findContour(opened, x, y, visited);
-          
-          // Calculate bounding box for the contour
-          if (contour.isNotEmpty) {
-            int minX = width, minY = height, maxX = 0, maxY = 0;
-            
-            for (final point in contour) {
-              minX = math.min(minX, point.x);
-              minY = math.min(minY, point.y);
-              maxX = math.max(maxX, point.x);
-              maxY = math.max(maxY, point.y);
-            }
-            
-            final boxWidth = maxX - minX;
-            final boxHeight = maxY - minY;
-            
-            if (boxWidth > 2 && boxHeight > 2) {
-              boundingBoxes.add(BoundingBox(
-                x: minX / width,
-                y: minY / height,
-                width: boxWidth / width,
-                height: boxHeight / height,
-              ));
-            }
-          }
-        }
-      }
-    }
-    
-    return boundingBoxes;
-  }
-
-  List<Point<int>> _findContour(img.Image image, int startX, int startY, List<List<bool>> visited) {
-    final List<Point<int>> contour = [];
-    final queue = Queue<Point<int>>();
-    queue.add(Point(startX, startY));
-    
-    while (queue.isNotEmpty) {
-      final point = queue.removeFirst();
-      final x = point.x;
-      final y = point.y;
-      
-      if (x >= 0 && x < image.width && y >= 0 && y < image.height && 
-          !visited[y][x] && image.getPixel(x, y) == img.ColorRgb8(255, 255, 255)) {
-        visited[y][x] = true;
-        contour.add(Point(x, y));
-        
-        // Add neighbors
-        queue.add(Point(x + 1, y));
-        queue.add(Point(x - 1, y));
-        queue.add(Point(x, y + 1));
-        queue.add(Point(x, y - 1));
-      }
-    }
-    
-    return contour;
-  }
-
   Float32List _flattenNestedList(List nestedList) {
     final List<double> flattened = [];
     void flatten(dynamic item) {
@@ -170,30 +49,112 @@ class TextDetector {
     return Float32List.fromList(flattened);
   }
 
-  List<int> postprocessProbabilityMap(Float32List probMap) {
-    final threshold = 0.1;
-    return probMap.map((prob) => prob > threshold ? 1 : 0).toList();
-  }
-
-  void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
+  Future<List<BoundingBox>> processDetectionOutput(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
-    final queue = <math.Point<int>>[math.Point(x, y)];
+    
+    final heatmapImage = await createHeatmapFromProbMap(probMap, width, height);
+    return extractBoundingBoxesFromHeatmap(heatmapImage, [width, height]);
+  }
 
-    while (queue.isNotEmpty) {
-      final point = queue.removeLast();
-      final px = point.x;
-      final py = point.y;
-
-      if (px >= 0 && px < width && py >= 0 && py < height && binaryMap[py][px] && labels[py][px] == -1) {
-        labels[py][px] = label;
-        bbox.update(px, py);
-
-        queue.add(math.Point(px + 1, py));
-        queue.add(math.Point(px - 1, py));
-        queue.add(math.Point(px, py + 1));
-        queue.add(math.Point(px, py - 1));
-      }
+  Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
+    final imageBytes = Uint8List(width * height);
+    
+    for (int i = 0; i < width * height; i++) {
+      imageBytes[i] = (probMap[i] * 255).round();
     }
+    
+    return imageBytes;
+  }
+
+  Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(Uint8List heatmapBytes, List<int> size) async {
+    try {
+      // Create the image matrix from bytes
+      final Map<String, dynamic> input = {
+        "data": heatmapBytes,
+        "width": size[1],
+        "height": size[0],
+      };
+
+      // Apply threshold
+      final thresholded = await cv.Cv2.threshold(input, {"thresh": 77, "maxval": 255});
+
+      // Apply morphological opening
+      final morphKernel = await cv.Cv2.getStructuringElement({
+        "shape": cv.Cv2.MORPH_RECT,
+        "ksize": [2, 2]
+      });
+
+      final opened = await cv.Cv2.morphologyEx({
+        "src": thresholded,
+        "op": cv.Cv2.MORPH_OPEN,
+        "kernel": morphKernel
+      });
+
+      // Find contours
+      final contours = await cv.Cv2.findContours({
+        "image": opened,
+        "mode": cv.Cv2.RETR_EXTERNAL,
+        "method": cv.Cv2.CHAIN_APPROX_SIMPLE,
+      });
+
+      final List<BoundingBox> boundingBoxes = [];
+
+      // Process contours and use unshift (add at beginning) like in JavaScript
+      for (final contour in contoursResult['contours']) {
+        final rect = await cv.Cv2.boundingRect({"points": contour});
+        
+        if (rect['width'] > 2 && rect['height'] > 2) {
+          // Insert at the beginning of the list (equivalent to unshift)
+          boundingBoxes.insert(0, await transformBoundingBox(rect, boundingBoxes.length, size));
+        }
+      }
+
+      return boundingBoxes;
+    } catch (e) {
+      print('OpenCV Error: $e');
+      throw Exception('Failed to process image with OpenCV: $e');
+    }
+  }
+
+
+    Future<BoundingBox> transformBoundingBox(Map<String, dynamic> contour, int id, List<int> size) async {
+    double offset = (contour['width'] * contour['height'] * 1.8) / 
+                   (2 * (contour['width'] + contour['height']));
+    
+    // Match exactly with JavaScript implementation
+    double p1 = clamp(contour['x'] - offset, size[1].toDouble()) - 1;
+    double p2 = clamp(p1 + contour['width'] + 2 * offset, size[1].toDouble()) - 1;
+    double p3 = clamp(contour['y'] - offset, size[0].toDouble()) - 1;
+    double p4 = clamp(p3 + contour['height'] + 2 * offset, size[0].toDouble()) - 1;
+
+    // Create coordinates array exactly like JavaScript version
+    List<List<double>> coordinates = [
+      [p1 / size[1], p3 / size[0]],
+      [p2 / size[1], p3 / size[0]],
+      [p2 / size[1], p4 / size[0]],
+      [p1 / size[1], p4 / size[0]],
+    ];
+
+    // Let's modify our BoundingBox class to include all the JavaScript properties
+    return BoundingBox(
+      id: id,
+      x: coordinates[0][0],
+      y: coordinates[0][1],
+      width: coordinates[1][0] - coordinates[0][0],
+      height: coordinates[2][1] - coordinates[0][1],
+      coordinates: coordinates,
+      config: {"stroke": getRandomColor()},
+    );
+  }
+
+  // Add color generation similar to JavaScript
+  String getRandomColor() {
+    final random = math.Random();
+    return '#${(random.nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
+  }
+
+  double clamp(double number, double size) {
+    return math.max(0, math.min(number, size));
   }
 }
