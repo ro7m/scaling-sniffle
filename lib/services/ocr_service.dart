@@ -1,5 +1,5 @@
 import 'dart:ui' as ui;
-import 'package:opencv_4/opencv_4.dart' as cv;
+import 'package:opencv_dart/opencv_dart.dart' as cv;
 import 'model_loader.dart';
 import 'image_preprocessor.dart';
 import 'text_detector.dart';

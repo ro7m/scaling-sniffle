@@ -1,7 +1,7 @@
 import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'dart:math' as math;
-import 'package:opencv_4/opencv_4.dart' as cv;
+import 'package:opencv_dart/opencv_dart.dart' as cv;
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/bounding_box.dart';
 import '../constants.dart';
