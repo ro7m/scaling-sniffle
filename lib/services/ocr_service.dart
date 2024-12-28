@@ -44,10 +44,10 @@ class OCRService {
     );
   }
 
-  Future<List<OCRResult>> processImage(ui.Image image, {void Function(String)? debugCallback}) async {
-    this.debugCallback = debugCallback;
-    try {
-      debugCallback?.call('Starting image processing...');
+Future<List<OCRResult>> processImage(ui.Image image, {void Function(String)? debugCallback}) async {
+  this.debugCallback = debugCallback;
+  try {
+    debugCallback?.call('Starting image processing...');
 
       final preprocessedImage = await imagePreprocessor.preprocessForDetection(image);
       debugCallback?.call('Image preprocessed for detection');
@@ -55,33 +55,34 @@ class OCRService {
       final detectionResult = await textDetector!.runDetection(preprocessedImage);
       debugCallback?.call('Detection completed');
 
-      final boundingBoxes = await textDetector!.extractBoundingBoxes(detectionResult, debugCallback: debugCallback);
+      // Use the new heatmap-based bounding box extraction
+      final boundingBoxes = await textDetector!.processDetectionOutput(detectionResult);
       debugCallback?.call('Found ${boundingBoxes.length} bounding boxes');
 
-      if (boundingBoxes.isEmpty) {
-        return [];
-      }
-
-      // Transform bounding boxes to original image coordinates
-      final transformedBoundingBoxes = boundingBoxes.map((box) => transformBoundingBox(box, 0, [image.height, image.width])).toList();
-
-      final results = <OCRResult>[];
-      for (var box in transformedBoundingBoxes) {
-        final croppedImage = await _cropImage(image, box);
-        final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
-        final text = await textRecognizer!.recognizeText(preprocessedCrop);
-        if (text.isNotEmpty) {
-          results.add(OCRResult(text: text, boundingBox: box));
-        }
-      }
-
-      debugCallback?.call('Processed ${results.length} text regions');
-      return results;
-    } catch (e, stack) {
-      debugCallback?.call('Error in processImage: $e\n$stack');
-      throw Exception('Error in processImage: $e');
+    if (boundingBoxes.isEmpty) {
+      return [];
     }
+
+    // Transform bounding boxes to original image coordinates
+    final transformedBoundingBoxes = boundingBoxes.map((box) => transformBoundingBox(box, 0, [image.height, image.width])).toList();
+
+    final results = <OCRResult>[];
+    for (var box in transformedBoundingBoxes) {
+      final croppedImage = await _cropImage(image, box);
+      final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
+      final text = await textRecognizer!.recognizeText(preprocessedCrop, transformedBoundingBoxes.length); // Pass the number of crops
+      if (text.isNotEmpty) {
+        results.add(OCRResult(text: text, boundingBox: box));
+      }
+    }
+
+    debugCallback?.call('Processed ${results.length} text regions');
+    return results;
+  } catch (e, stack) {
+    debugCallback?.call('Error in processImage: $e\n$stack');
+    throw Exception('Error in processImage: $e');
   }
+}
 
   Future<ui.Image> _cropImage(ui.Image image, BoundingBox box) async {
     final recorder = ui.PictureRecorder();

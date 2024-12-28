@@ -8,8 +8,8 @@ class TextRecognizer {
 
   TextRecognizer(this.recognitionModel);
 
-  Future<String> recognizeText(Float32List preprocessedImage) async {
-    final shape = [1, 3, OCRConstants.REC_TARGET_SIZE[0], OCRConstants.REC_TARGET_SIZE[1]];
+  Future<String> recognizeText(Float32List preprocessedImage, int numberOfCrops) async {
+    final shape = [numberOfCrops, 3, OCRConstants.REC_TARGET_SIZE[0], OCRConstants.REC_TARGET_SIZE[1]];
     final inputOrt = OrtValueTensor.createTensorWithDataList(preprocessedImage, shape);
     final inputs = {'input': inputOrt};
     final runOptions = OrtRunOptions();
@@ -24,7 +24,7 @@ class TextRecognizer {
     }
     final logits = _flattenNestedList(output as List);
 
-    final batchSize = 1;
+    final batchSize = numberOfCrops;
     final height = OCRConstants.REC_TARGET_SIZE[0];
     final numClasses = OCRConstants.VOCAB.length;
 
@@ -35,11 +35,13 @@ class TextRecognizer {
     }
 
     final List<int> bestPath = [];
-    for (int h = 0; h < height; h++) {
-      final List<double> timestepLogits = logits.sublist(h * numClasses, (h + 1) * numClasses);
-      final softmaxed = softmax(timestepLogits);
-      final maxIndex = softmaxed.indexWhere((x) => x == softmaxed.reduce(math.max));
-      bestPath.add(maxIndex);
+    for (int b = 0; b < batchSize; b++) {
+      for (int h = 0; h < height; h++) {
+        final List<double> timestepLogits = logits.sublist((b * height + h) * numClasses, (b * height + h + 1) * numClasses);
+        final softmaxed = softmax(timestepLogits);
+        final maxIndex = softmaxed.indexWhere((x) => x == softmaxed.reduce(math.max));
+        bestPath.add(maxIndex);
+      }
     }
 
     final StringBuffer decodedText = StringBuffer();

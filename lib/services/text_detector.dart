@@ -1,3 +1,4 @@
+import 'package:image/image.dart' as img;
 import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'dart:math' as math;
@@ -49,6 +50,111 @@ class TextDetector {
     return Float32List.fromList(flattenedOutput);
   }
 
+  Future<List<BoundingBox>> processDetectionOutput(Float32List probMap) async {
+    final width = OCRConstants.TARGET_SIZE[0];
+    final height = OCRConstants.TARGET_SIZE[1];
+    
+    // 1. Convert probability map to heatmap image
+    final heatmapImage = await createHeatmapFromProbMap(probMap, width, height);
+    
+    // 2. Process the heatmap to extract bounding boxes
+    return extractBoundingBoxesFromHeatmap(heatmapImage, width, height);
+  }
+
+  Future<img.Image> createHeatmapFromProbMap(Float32List probMap, int width, int height) {
+    // Create a grayscale image from probability map
+    final image = img.Image(width: width, height: height);
+    
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        final prob = probMap[y * width + x];
+        final pixelValue = (prob * 255).round();
+        image.setPixel(x, y, img.ColorRgb8(pixelValue, pixelValue, pixelValue));
+      }
+    }
+    
+    return Future.value(image);
+  }
+
+  Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(img.Image heatmap, int width, int height) async {
+    // 1. Convert to grayscale if not already
+    final grayscale = img.grayscale(heatmap);
+    
+    // 2. Apply threshold (similar to cv.threshold in JS version)
+    final binary = img.binarize(grayscale, threshold: 77);
+    
+    // 3. Apply morphological opening (similar to cv.morphologyEx)
+    final opened = img.morphologyEx(
+      binary,
+      img.kernelCross(2), // 2x2 kernel
+      img.MorphologyOperation.open
+    );
+    
+    // 4. Find contours (we'll use connected components as an alternative)
+    final List<BoundingBox> boundingBoxes = [];
+    final visited = List.generate(height, (_) => List.filled(width, false));
+    
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        if (!visited[y][x] && opened.getPixel(x, y) == img.ColorRgb8(255, 255, 255)) {
+          final contour = _findContour(opened, x, y, visited);
+          
+          // Calculate bounding box for the contour
+          if (contour.isNotEmpty) {
+            int minX = width, minY = height, maxX = 0, maxY = 0;
+            
+            for (final point in contour) {
+              minX = math.min(minX, point.x);
+              minY = math.min(minY, point.y);
+              maxX = math.max(maxX, point.x);
+              maxY = math.max(maxY, point.y);
+            }
+            
+            final boxWidth = maxX - minX;
+            final boxHeight = maxY - minY;
+            
+            if (boxWidth > 2 && boxHeight > 2) {
+              boundingBoxes.add(BoundingBox(
+                x: minX / width,
+                y: minY / height,
+                width: boxWidth / width,
+                height: boxHeight / height,
+              ));
+            }
+          }
+        }
+      }
+    }
+    
+    return boundingBoxes;
+  }
+
+  List<Point<int>> _findContour(img.Image image, int startX, int startY, List<List<bool>> visited) {
+    final List<Point<int>> contour = [];
+    final queue = Queue<Point<int>>();
+    queue.add(Point(startX, startY));
+    
+    while (queue.isNotEmpty) {
+      final point = queue.removeFirst();
+      final x = point.x;
+      final y = point.y;
+      
+      if (x >= 0 && x < image.width && y >= 0 && y < image.height && 
+          !visited[y][x] && image.getPixel(x, y) == img.ColorRgb8(255, 255, 255)) {
+        visited[y][x] = true;
+        contour.add(Point(x, y));
+        
+        // Add neighbors
+        queue.add(Point(x + 1, y));
+        queue.add(Point(x - 1, y));
+        queue.add(Point(x, y + 1));
+        queue.add(Point(x, y - 1));
+      }
+    }
+    
+    return contour;
+  }
+
   Float32List _flattenNestedList(List nestedList) {
     final List<double> flattened = [];
     void flatten(dynamic item) {
@@ -64,58 +170,9 @@ class TextDetector {
     return Float32List.fromList(flattened);
   }
 
-  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap, {void Function(String)? debugCallback}) async {
-    final List<BoundingBox> boxes = [];
+  List<int> postprocessProbabilityMap(Float32List probMap) {
     final threshold = 0.1;
-    final width = OCRConstants.TARGET_SIZE[0];
-    final height = OCRConstants.TARGET_SIZE[1];
-
-    List<List<bool>> binaryMap = List.generate(
-      height,
-      (_) => List.generate(width, (x) => probMap[x + _ * width] > threshold),
-    );
-
-    int currentLabel = 0;
-    Map<int, _BBox> components = {};
-    List<List<int>> labels = List.generate(height, (_) => List.filled(width, -1));
-
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        if (binaryMap[y][x] && labels[y][x] == -1) {
-          _BBox bbox = _BBox();
-          _floodFill(x, y, currentLabel, labels, binaryMap, bbox);
-
-          if (bbox.isValid()) {
-            components[currentLabel] = bbox;
-            currentLabel++;
-          }
-        }
-      }
-    }
-
-    for (var component in components.values) {
-      final boxWidth = component.maxX - component.minX + 1;
-      final boxHeight = component.maxY - component.minY + 1;
-
-      if (boxWidth > 2 && boxHeight > 2) {
-        double padding = (boxWidth * boxHeight * 1.8) / (2 * (boxWidth + boxHeight));
-
-        double x1 = math.max(0, (component.minX - padding) / width);
-        double y1 = math.max(0, (component.minY - padding) / height);
-        double x2 = math.min(1.0, (component.maxX + padding) / width);
-        double y2 = math.min(1.0, (component.maxY + padding) / height);
-
-        boxes.add(BoundingBox(
-          x: x1,
-          y: y1,
-          width: x2 - x1,
-          height: y2 - y1,
-        ));
-      }
-    }
-
-    debugCallback?.call('Found ${boxes.length} bounding boxes');
-    return boxes;
+    return probMap.map((prob) => prob > threshold ? 1 : 0).toList();
   }
 
   void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
@@ -139,31 +196,4 @@ class TextDetector {
       }
     }
   }
-}
-
-Future<ui.Image> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
-  final recorder = ui.PictureRecorder();
-  final canvas = ui.Canvas(recorder);
-  final paint = ui.Paint();
-  final imageBytes = Uint8List.fromList(List.generate(width * height * 4, (i) {
-    final index = i ~/ 4;
-    final pixelValue = (probMap[index] * 255).round();
-    switch (i % 4) {
-      case 0:
-      case 1:
-      case 2:
-        return pixelValue; // R, G, B
-      case 3:
-        return 255; // A
-      default:
-        return 0;
-    }
-  }));
-
-  final codec = await ui.instantiateImageCodec(imageBytes, targetWidth: width, targetHeight: height);
-  final frame = await codec.getNextFrame();
-  final image = frame.image;
-
-  canvas.drawImage(image, ui.Offset.zero, paint);
-  return recorder.endRecording().toImage(width, height);
 }
