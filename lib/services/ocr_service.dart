@@ -57,22 +57,22 @@ class OCRService {
     }
   }
 
-  Future<ui.Image> _cropImage(ui.Image image, BoundingBox box) async {
-    final recorder = ui.PictureRecorder();
-    final canvas = ui.Canvas(recorder);
-    
-    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final dst = Rect.fromLTWH(
-      box.x * image.width,
-      box.y * image.height,
-      box.width * image.width,
-      box.height * image.height,
-    );
-    
-    canvas.drawImageRect(image, src, dst, Paint());
-    return recorder.endRecording().toImage(
-      (box.width * image.width).round(),
-      (box.height * image.height).round(),
-    );
-  }
+ Future<ui.Image> _cropImage(ui.Image image, BoundingBox box) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  
+  final src = ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+  final dst = ui.Rect.fromLTWH(
+    box.x * image.width,
+    box.y * image.height,
+    box.width * image.width,
+    box.height * image.height,
+  );
+  
+  canvas.drawImageRect(image, src, dst, ui.Paint());
+  return recorder.endRecording().toImage(
+    (box.width * image.width).round(),
+    (box.height * image.height).round(),
+  );
+}
 }

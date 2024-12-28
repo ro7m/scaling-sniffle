@@ -1,3 +1,5 @@
+import "bounding_box.dart";
+
 class OCRResult {
   final String text;
   final BoundingBox boundingBox;
