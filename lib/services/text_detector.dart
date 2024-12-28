@@ -1,10 +1,24 @@
-import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'dart:math' as math;
-import 'package:opencv_dart/opencv_dart.dart' as cv;
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/bounding_box.dart';
 import '../constants.dart';
+
+class _BBox {
+  int minX = 999999, minY = 999999;
+  int maxX = -1, maxY = -1;
+
+  void update(int x, int y) {
+    minX = math.min(minX, x);
+    minY = math.min(minY, y);
+    maxX = math.max(maxX, x);
+    maxY = math.max(maxY, y);
+  }
+
+  bool isValid() {
+    return maxX >= 0 && maxY >= 0 && maxX > minX && maxY > minY;
+  }
+}
 
 class TextDetector {
   final OrtSession detectionModel;
@@ -31,7 +45,7 @@ class TextDetector {
       element?.release();
     });
 
-    return Float32List.fromList(flattenedOutput);
+    return _convertToFloat32ListAndApplySigmoid(flattenedOutput);
   }
 
   Float32List _flattenNestedList(List nestedList) {
@@ -49,149 +63,86 @@ class TextDetector {
     return Float32List.fromList(flattened);
   }
 
-  Future<List<BoundingBox>> processDetectionOutput(Float32List probMap) async {
+  Float32List _convertToFloat32ListAndApplySigmoid(Float32List flattened) {
+    final Float32List result = Float32List(flattened.length);
+    for (int i = 0; i < flattened.length; i++) {
+      result[i] = 1.0 / (1.0 + math.exp(-flattened[i]));
+    }
+    return result;
+  }
+
+  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
+    final List<BoundingBox> boxes = [];
+    final threshold = 0.1;
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
-    
-    final heatmapImage = await createHeatmapFromProbMap(probMap, width, height);
-    return extractBoundingBoxesFromHeatmap(heatmapImage, [width, height]);
-  }
 
-  Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
-    final imageBytes = Uint8List(width * height);
-    
-    for (int i = 0; i < width * height; i++) {
-      imageBytes[i] = (probMap[i] * 255).round();
-    }
-    
-    return imageBytes;
-  }
+    List<List<bool>> binaryMap = List.generate(
+      height,
+      (_) => List.generate(width, (x) => probMap[x + _ * width] > threshold),
+    );
 
-    Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(Uint8List heatmapBytes, List<int> size) async {
-    try {
-      // Create the image matrix from bytes
-      cv.Mat src = cv.Mat.create(
-        size[0],  // height
-        size[1],  // width
-        cv.MatType.cv8UC1
-      );
-      src.setDataWithBytes(heatmapBytes);
+    int currentLabel = 0;
+    Map<int, _BBox> components = {};
+    List<List<int>> labels = List.generate(height, (_) => List.filled(width, -1));
 
-      // Create destination matrix for threshold
-      cv.Mat thresholded = cv.Mat.create(size[0], size[1], cv.MatType.cv8UC1);
-      
-      // Apply threshold
-      double thresh = cv.Imgproc.threshold(
-        src,                    // src
-        thresholded,           // dst
-        77,                    // thresh value
-        255,                   // maxval
-        cv.ThresholdTypes.binary // threshold type
-      );
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        if (binaryMap[y][x] && labels[y][x] == -1) {
+          _BBox bbox = _BBox();
+          _floodFill(x, y, currentLabel, labels, binaryMap, bbox);
 
-      // Create structuring element
-      cv.Mat kernel = cv.Imgproc.getStructuringElement(
-        cv.MorphShapes.rect,   // shape
-        cv.Size(2, 2)         // kernel size
-      );
-
-      // Create output Mat for morphology
-      cv.Mat opened = cv.Mat.create(size[0], size[1], cv.MatType.cv8UC1);
-      
-      // Apply morphological opening
-      cv.Imgproc.morphologyEx(
-        thresholded,           // src
-        opened,                // dst
-        cv.MorphTypes.open,    // operation type
-        kernel                 // kernel
-      );
-
-      // Find contours
-      List<cv.MatVector> contours = [];
-      cv.Mat hierarchy = cv.Mat.create(1, 1, cv.MatType.cv32SC4);
-      
-      cv.Imgproc.findContours(
-        opened,                              // image
-        contours,                            // contours
-        hierarchy,                           // hierarchy
-        cv.RetrievalModes.external,         // mode
-        cv.ContourApproximationModes.simple // method
-      );
-
-      final List<BoundingBox> boundingBoxes = [];
-
-      // Process contours
-      for (var contour in contours) {
-        cv.Rect rect = cv.Imgproc.boundingRect(contour);
-        
-        // Access rect properties directly using dot notation
-        if (rect.width > 2 && rect.height > 2) {
-          boundingBoxes.insert(0, await transformBoundingBox(
-            // Create a map with the rect properties
-            {
-              'x': rect.x,
-              'y': rect.y,
-              'width': rect.width,
-              'height': rect.height
-            }, 
-            boundingBoxes.length, 
-            size
-          ));
+          if (bbox.isValid()) {
+            components[currentLabel] = bbox;
+            currentLabel++;
+          }
         }
       }
-
-      // Clean up resources
-      src.release();
-      thresholded.release();
-      kernel.release();
-      opened.release();
-      hierarchy.release();
-      for (var contour in contours) {
-        contour.release();
-      }
-
-      return boundingBoxes;
-    } catch (e, stackTrace) {
-      print('OpenCV Error: $e');
-      print('Stack trace: $stackTrace');
-      throw Exception('Failed to process image with OpenCV: $e');
     }
+
+    for (var component in components.values) {
+      final boxWidth = component.maxX - component.minX + 1;
+      final boxHeight = component.maxY - component.minY + 1;
+
+      if (boxWidth > 2 && boxHeight > 2) {
+        double padding = (boxWidth * boxHeight * 1.8) / (2 * (boxWidth + boxHeight));
+
+        double x1 = math.max(0, (component.minX - padding) / width);
+        double y1 = math.max(0, (component.minY - padding) / height);
+        double x2 = math.min(1.0, (component.maxX + padding) / width);
+        double y2 = math.min(1.0, (component.maxY + padding) / height);
+
+        boxes.add(BoundingBox(
+          x: x1,
+          y: y1,
+          width: x2 - x1,
+          height: y2 - y1,
+        ));
+      }
+    }
+
+    return boxes;
   }
 
-  Future<BoundingBox> transformBoundingBox(Map<String, dynamic> rectData, int id, List<int> size) async {
-    double offset = (rectData['width'] * rectData['height'] * 1.8) / 
-                   (2 * (rectData['width'] + rectData['height']));
-    
-    double p1 = clamp(rectData['x'] - offset, size[1].toDouble()) - 1;
-    double p2 = clamp(p1 + rectData['width'] + 2 * offset, size[1].toDouble()) - 1;
-    double p3 = clamp(rectData['y'] - offset, size[0].toDouble()) - 1;
-    double p4 = clamp(p3 + rectData['height'] + 2 * offset, size[0].toDouble()) - 1;
+  void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
+    final width = OCRConstants.TARGET_SIZE[0];
+    final height = OCRConstants.TARGET_SIZE[1];
+    final queue = <math.Point<int>>[math.Point(x, y)];
 
-    List<List<double>> coordinates = [
-      [p1 / size[1], p3 / size[0]],
-      [p2 / size[1], p3 / size[0]],
-      [p2 / size[1], p4 / size[0]],
-      [p1 / size[1], p4 / size[0]],
-    ];
+    while (queue.isNotEmpty) {
+      final point = queue.removeLast();
+      final px = point.x;
+      final py = point.y;
 
-    return BoundingBox(
-      id: id,
-      x: coordinates[0][0],
-      y: coordinates[0][1],
-      width: coordinates[1][0] - coordinates[0][0],
-      height: coordinates[2][1] - coordinates[0][1],
-      coordinates: coordinates,
-      config: {"stroke": getRandomColor()},
-    );
-  }
+      if (px >= 0 && px < width && py >= 0 && py < height && binaryMap[py][px] && labels[py][px] == -1) {
+        labels[py][px] = label;
+        bbox.update(px, py);
 
-  // Add color generation similar to JavaScript
-  String getRandomColor() {
-    final random = math.Random();
-    return '#${(random.nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
-  }
-
-  double clamp(double number, double size) {
-    return math.max(0, math.min(number, size));
+        queue.add(math.Point(px + 1, py));
+        queue.add(math.Point(px - 1, py));
+        queue.add(math.Point(px, py + 1));
+        queue.add(math.Point(px, py - 1));
+      }
+    }
   }
 }

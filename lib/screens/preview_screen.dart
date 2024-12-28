@@ -53,18 +53,12 @@ class _PreviewScreenState extends State<PreviewScreen> {
       body: Center(
         child: _boundingBoxes.isEmpty || _decodedImage == null
             ? CircularProgressIndicator()
-            : Column(
-                children: [
-                  Expanded(
-                    child: CustomPaint(
-                      painter: BoundingBoxPainter(
-                        image: _decodedImage!, // Pass the decoded image
-                        boundingBoxes: _boundingBoxes,
-                      ),
-                      child: Container(),
-                    ),
-                  )
-                ],
+            : CustomPaint(
+                painter: BoundingBoxPainter(
+                  image: _decodedImage!, // Pass the decoded image
+                  boundingBoxes: _boundingBoxes,
+                ),
+                child: Container(),
               ),
       ),
     );
