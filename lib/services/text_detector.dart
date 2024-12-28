@@ -1,7 +1,7 @@
 import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'dart:math' as math;
-import 'package:opencv_dart/opencv_dart.dart';
+import 'package:opencv_dart/opencv_dart.dart' as cv;
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/bounding_box.dart';
 import '../constants.dart';
@@ -67,80 +67,56 @@ class TextDetector {
     return imageBytes;
   }
 
-   Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(Uint8List heatmapBytes, List<int> size) async {
+  Future<List<BoundingBox>> extractBoundingBoxesFromHeatmap(Uint8List heatmapBytes, List<int> size) async {
     try {
-      // Create Mat from bytes
-      Mat src = Mat.fromBytes(
-        size[0], // height
-        size[1], // width
-        MatType.CV_8UC1,
-        heatmapBytes
-      );
+      // Create the image matrix from bytes
+      final input = {
+        "data": heatmapBytes,
+        "width": size[1],
+        "height": size[0],
+        "type": cv.CV_8UC1
+      };
 
-      // Create output Mat for threshold
-      Mat thresholded = new Mat();
-      
       // Apply threshold
-      Core.threshold(
-        src,
-        thresholded,
-        77,
-        255,
-        Core.THRESH_BINARY
-      );
+      final thresholded = await cv.threshold(input, {
+        "thresh": 77,
+        "maxval": 255,
+        "type": cv.THRESH_BINARY
+      });
 
-      // Create structuring element
-      Mat kernel = Imgproc.getStructuringElement(
-        Imgproc.MORPH_RECT,
-        Size(2, 2)
-      );
+      // Create structuring element for morphology
+      final morphKernel = await cv.getStructuringElement({
+        "shape": cv.MORPH_RECT,
+        "ksize": [2, 2]
+      });
 
-      // Create output Mat for morphology
-      Mat opened = new Mat();
-      
       // Apply morphological opening
-      Imgproc.morphologyEx(
-        thresholded,
-        opened,
-        Imgproc.MORPH_OPEN,
-        kernel
-      );
+      final opened = await cv.morphologyEx({
+        "src": thresholded,
+        "op": cv.MORPH_OPEN,
+        "kernel": morphKernel
+      });
 
       // Find contours
-      List<List<Point>> contours = [];
-      Mat hierarchy = new Mat();
-      
-      Imgproc.findContours(
-        opened.clone(),
-        contours,
-        hierarchy,
-        Imgproc.RETR_EXTERNAL,
-        Imgproc.CHAIN_APPROX_SIMPLE
-      );
+      final contoursResult = await cv.findContours({
+        "image": opened,
+        "mode": cv.RETR_EXTERNAL,
+        "method": cv.CHAIN_APPROX_SIMPLE
+      });
 
       final List<BoundingBox> boundingBoxes = [];
 
       // Process contours
-      for (var contour in contours) {
-        Rect rect = Imgproc.boundingRect(contour);
+      for (final contour in contoursResult['contours']) {
+        final rect = await cv.boundingRect({
+          "points": contour
+        });
         
-        if (rect.width > 2 && rect.height > 2) {
+        if (rect['width'] > 2 && rect['height'] > 2) {
           // Insert at the beginning of the list (equivalent to unshift)
-          boundingBoxes.insert(0, await transformBoundingBox({
-            'x': rect.x,
-            'y': rect.y,
-            'width': rect.width,
-            'height': rect.height
-          }, boundingBoxes.length, size));
+          boundingBoxes.insert(0, await transformBoundingBox(rect, boundingBoxes.length, size));
         }
       }
-
-      // Clean up resources
-      src.release();
-      thresholded.release();
-      kernel.release();
-      opened.release();
-      hierarchy.release();
 
       return boundingBoxes;
     } catch (e) {
