@@ -19,7 +19,7 @@ class OCRService {
   }
 
   Future<void> loadModels({void Function(String)? debugCallback}) async {
-    await cv.Cv2.initOpenCV();
+    await cv.initOpenCV();
     await modelLoader.loadModels(debugCallback: debugCallback);
     textDetector = TextDetector(modelLoader.detectionModel!);
     textRecognizer = TextRecognizer(modelLoader.recognitionModel!);
@@ -43,7 +43,7 @@ class OCRService {
       for (var box in boundingBoxes) {
         final croppedImage = await _cropImage(image, box);
         final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
-        final text = await textRecognizer!.recognizeText(preprocessedCrop);
+        final text = await textRecognizer!.recognizeText(preprocessedCrop,1);
         if (text.isNotEmpty) {
           results.add(OCRResult(text: text, boundingBox: box));
         }

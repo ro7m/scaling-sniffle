@@ -77,32 +77,32 @@ class TextDetector {
       };
 
       // Apply threshold
-      final thresholded = await cv.Cv2.threshold(input, {"thresh": 77, "maxval": 255});
+      final thresholded = await cv.threshold(input, {"thresh": 77, "maxval": 255});
 
       // Apply morphological opening
-      final morphKernel = await cv.Cv2.getStructuringElement({
-        "shape": cv.Cv2.MORPH_RECT,
+      final morphKernel = await cv.getStructuringElement({
+        "shape": cv.MORPH_RECT,
         "ksize": [2, 2]
       });
 
-      final opened = await cv.Cv2.morphologyEx({
+      final opened = await cv.morphologyEx({
         "src": thresholded,
-        "op": cv.Cv2.MORPH_OPEN,
+        "op": cv.MORPH_OPEN,
         "kernel": morphKernel
       });
 
       // Find contours
-      final contours = await cv.Cv2.findContours({
+      final contours = await cv.findContours({
         "image": opened,
-        "mode": cv.Cv2.RETR_EXTERNAL,
-        "method": cv.Cv2.CHAIN_APPROX_SIMPLE,
+        "mode": cv.RETR_EXTERNAL,
+        "method": cv.CHAIN_APPROX_SIMPLE,
       });
 
       final List<BoundingBox> boundingBoxes = [];
 
       // Process contours and use unshift (add at beginning) like in JavaScript
       for (final contour in contoursResult['contours']) {
-        final rect = await cv.Cv2.boundingRect({"points": contour});
+        final rect = await cv.boundingRect({"points": contour});
         
         if (rect['width'] > 2 && rect['height'] > 2) {
           // Insert at the beginning of the list (equivalent to unshift)
