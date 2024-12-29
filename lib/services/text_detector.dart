@@ -171,7 +171,7 @@ class TextDetector {
     );
   }
 
-Future<List<BoundingBox>> processImage(Float32List probMap) async {
+  Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
@@ -194,8 +194,18 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
             buffer[j + 3] = 255;        // A
         }
         
-        // Use data pointer for bulk copy
-        src.data.asTypedList(buffer.length).setAll(0, buffer);
+        // Fix: Copy data directly using row-by-row approach
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                final bufferIdx = (row * width + col) * 4;
+                src.set(row, col, [
+                    buffer[bufferIdx],     // R
+                    buffer[bufferIdx + 1], // G
+                    buffer[bufferIdx + 2], // B
+                    buffer[bufferIdx + 3]  // A
+                ]);
+            }
+        }
 
         // 2. Convert to grayscale
         cv.Mat gray = cv.Mat.create(
@@ -259,7 +269,7 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
         print('OpenCV Error: $e');
         rethrow;
     }
-}
+  }
 
 double clamp(double value, double max) {
     return math.max(0, math.min(value, max));
