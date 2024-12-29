@@ -146,7 +146,7 @@ class TextDetector {
     );
   }
 
-  Future<List<BoundingBox>> processImage(Float32List probMap) async {
+Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
@@ -158,52 +158,74 @@ class TextDetector {
       cv.Mat src = cv.Mat.create(
         rows: height,
         cols: width,
-        type: 24,  // CV_8UC4 = 8-bit, 4 channels
+        type: cv.MatType.CV_8UC4,  // Fixed: Use MatType enum
       );
       
-      // Copy data to Mat
-      cv.Mat data = cv.Mat.fromBytes(heatmapBytes);
-      data.copyTo(src);
-      data.release();
+      // Create Mat from bytes
+      final length = heatmapBytes.length;
+      src.data.asTypedList(length).setAll(0, heatmapBytes);
 
       // 3. Convert to grayscale
-      cv.Mat gray = cv.Mat.create(rows: height, cols: width, type: 0);  // CV_8UC1
-      cv.cvtColor(src, 7, dst: gray);  // 7 = COLOR_RGBA2GRAY
+      cv.Mat gray = cv.Mat.create(
+        rows: height, 
+        cols: width, 
+        type: cv.MatType.CV_8UC1
+      );
+      
+      cv.cvtColor(src, cv.COLOR_RGBA2GRAY, dst: gray);
 
       // 4. Apply threshold
-      cv.Mat binary = cv.Mat.create(rows: height, cols: width, type: 0);
+      cv.Mat binary = cv.Mat.create(
+        rows: height, 
+        cols: width, 
+        type: cv.MatType.CV_8UC1
+      );
+      
       cv.threshold(
         gray,
-        77,  // thresh
-        255,  // maxval
-        0,  // THRESH_BINARY
+        77,
+        255,
+        cv.THRESH_BINARY,
         dst: binary
       );
 
       // 5. Create kernel for morphological operation
-      cv.Mat kernel = cv.getStructuringElement(0, (2, 2));  // MORPH_RECT = 0
+      cv.Mat kernel = cv.getStructuringElement(
+        cv.MORPH_RECT,
+        (2, 2)
+      );
 
       // 6. Apply morphological opening
-      cv.Mat opened = cv.Mat.create(rows: height, cols: width, type: 0);
+      cv.Mat opened = cv.Mat.create(
+        rows: height, 
+        cols: width, 
+        type: cv.MatType.CV_8UC1
+      );
+      
       cv.morphologyEx(
         binary,
-        2,  // MORPH_OPEN
+        cv.MORPH_OPEN,
         kernel,
         dst: opened
       );
 
       // 7. Find contours
-      cv.Mat hierarchy = cv.Mat.create(rows: 1, cols: 1, type: 4);  // CV_32SC1
-      final contoursResult = cv.findContours(
+      cv.Mat hierarchy = cv.Mat.create(
+        rows: 1, 
+        cols: 1, 
+        type: cv.MatType.CV_32SC1
+      );
+      
+      final (contours, _) = cv.findContours(
         opened,
-        0,  // RETR_EXTERNAL
-        1   // CHAIN_APPROX_SIMPLE
+        cv.RETR_EXTERNAL,
+        cv.CHAIN_APPROX_SIMPLE
       );
 
       // 8. Process contours and create bounding boxes
       List<BoundingBox> boundingBoxes = [];
       
-      for (var contour in contoursResult.contours) {
+      for (var contour in contours) {
         cv.Rect boundRect = cv.boundingRect(cv.VecPoint(contour));
         
         if (boundRect.width > 2 && boundRect.height > 2) {
@@ -220,7 +242,7 @@ class TextDetector {
         }
       }
 
-      // Clean up OpenCV resources
+      // 9. Clean up OpenCV resources
       src.release();
       gray.release();
       binary.release();
