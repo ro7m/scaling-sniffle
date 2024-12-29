@@ -227,11 +227,9 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
       List<BoundingBox> boundingBoxes = [];
       
       for (var contour in contours) {
-        // Fix: Properly create VecPoint from contour points
-        final vecPoints = cv.VecPoint.fromPoints(
-          contour.map((p) => cv.Point(p.x, p.y)).toList()
-        );
-        cv.Rect boundRect = cv.boundingRect(vecPoints);
+        // Convert contour points to a format that boundingRect can handle
+        final points = contour.map((p) => cv.Point(p.x.toInt(), p.y.toInt())).toList();
+        cv.Rect boundRect = cv.boundingRect(contour); // Use contour directly
         
         if (boundRect.width > 2 && boundRect.height > 2) {
           Map<String, dynamic> contourData = {
@@ -245,9 +243,6 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
             await transformBoundingBox(contourData, boundingBoxes.length, [height, width])
           );
         }
-        
-        // Clean up VecPoint
-        vecPoints.dispose();
       }
 
       // 9. Clean up OpenCV resources
