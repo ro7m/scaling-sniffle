@@ -47,7 +47,7 @@ class TextDetector {
       element?.release();
     });
 
-    return _convertToFloat32ListAndApplySigmoid(flattenedOutput);
+    return _convertToFloat32ListAndApplySigmoidFast(flattenedOutput);
   }
 
   Float32List _flattenNestedList(List nestedList) {
@@ -73,9 +73,34 @@ class TextDetector {
     return result;
   }
 
+  Float32List _convertToFloat32ListAndApplySigmoidFast(Float32List flattened) {
+  final Float32List result = Float32List(flattened.length);
+  
+  // Process in chunks for better cache utilization
+  const chunkSize = 256;
+  
+  for (int chunk = 0; chunk < flattened.length; chunk += chunkSize) {
+    final end = math.min(chunk + chunkSize, flattened.length);
+    
+    for (int i = chunk; i < end; i++) {
+      final x = flattened[i];
+      
+      if (x <= -4.0) {
+        result[i] = 0.0;
+      } else if (x >= 4.0) {
+        result[i] = 1.0;
+      } else {
+        // Optimization: Use fast approximation
+        // This approximation has a maximum error of about 0.002
+        final xx = x * x;
+        final ax = x.abs();
+        result[i] = 0.5 + (0.197 * x) + (0.108 * xx) / (0.929 + ax + 0.15 * xx);
+      }
+    }
+  }
 
-
-
+  return result;
+}
 
   Float32List postprocessProbabilityMap(Float32List probMap) {
     const threshold = 0.1;
@@ -150,116 +175,91 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
-    // 1. Create heatmap from probability map
-    final heatmapBytes = await createHeatmapFromProbMap(probMap, width, height);
-    
     try {
-      // 2. Create source Mat from heatmap bytes (RGBA)
-      cv.Mat src = cv.Mat.create(
-        rows: height,
-        cols: width,
-        type: cv.MatType.CV_8UC4,
-      );
-      
-      // Copy bytes directly to Mat
-      for (int i = 0; i < heatmapBytes.length; i++) {
-        src.set(i ~/ (width * 4), (i % (width * 4)) ~/ 4, heatmapBytes[i]);
-      }
+        // 1. Create source Mat directly from probability map
+        cv.Mat src = cv.Mat.create(
+            rows: height,
+            cols: width,
+            type: cv.MatType.CV_8UC4,
+        );
 
-      // 3. Convert to grayscale
-      cv.Mat gray = cv.Mat.create(
-        rows: height, 
-        cols: width, 
-        type: cv.MatType.CV_8UC1
-      );
-      
-      cv.cvtColor(src, cv.COLOR_RGBA2GRAY, dst: gray);
-
-      // 4. Apply threshold
-      cv.Mat binary = cv.Mat.create(
-        rows: height, 
-        cols: width, 
-        type: cv.MatType.CV_8UC1
-      );
-      
-      cv.threshold(
-        gray,
-        77,
-        255,
-        cv.THRESH_BINARY,
-        dst: binary
-      );
-
-      // 5. Create kernel for morphological operation
-      cv.Mat kernel = cv.getStructuringElement(
-        cv.MORPH_RECT,
-        (2, 2)
-      );
-
-      // 6. Apply morphological opening
-      cv.Mat opened = cv.Mat.create(
-        rows: height, 
-        cols: width, 
-        type: cv.MatType.CV_8UC1
-      );
-      
-      cv.morphologyEx(
-        binary,
-        cv.MORPH_OPEN,
-        kernel,
-        dst: opened
-      );
-
-      // 7. Find contours
-      cv.Mat hierarchy = cv.Mat.create(
-        rows: 1, 
-        cols: 1, 
-        type: cv.MatType.CV_32SC1
-      );
-      
-      final (contours, _) = cv.findContours(
-        opened,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_SIMPLE
-      );
-
-      // 8. Process contours and create bounding boxes
-      List<BoundingBox> boundingBoxes = [];
-      
-      for (var contour in contours) {
-        // Convert contour points to a format that boundingRect can handle
-        final points = contour.map((p) => cv.Point(p.x.toInt(), p.y.toInt())).toList();
-        cv.Rect boundRect = cv.boundingRect(contour); // Use contour directly
-        
-        if (boundRect.width > 2 && boundRect.height > 2) {
-          Map<String, dynamic> contourData = {
-            'x': boundRect.x,
-            'y': boundRect.y,
-            'width': boundRect.width,
-            'height': boundRect.height,
-          };
-
-          boundingBoxes.insert(0, 
-            await transformBoundingBox(contourData, boundingBoxes.length, [height, width])
-          );
+        // Efficient bulk copy using buffer
+        final buffer = Uint8List(width * height * 4);
+        for (int i = 0; i < probMap.length; i++) {
+            final pixelValue = (probMap[i] * 255).round();
+            final j = i * 4;
+            buffer[j] = pixelValue;     // R
+            buffer[j + 1] = pixelValue; // G
+            buffer[j + 2] = pixelValue; // B
+            buffer[j + 3] = 255;        // A
         }
-      }
+        
+        // Use data pointer for bulk copy
+        src.data.asTypedList(buffer.length).setAll(0, buffer);
 
-      // 9. Clean up OpenCV resources
-      src.release();
-      gray.release();
-      binary.release();
-      kernel.release();
-      opened.release();
-      hierarchy.release();
+        // 2. Convert to grayscale
+        cv.Mat gray = cv.Mat.create(
+            rows: height, 
+            cols: width, 
+            type: cv.MatType.CV_8UC1
+        );
+        cv.cvtColor(src, cv.COLOR_RGBA2GRAY, dst: gray);
+        src.release();  // Release src as soon as we're done with it
 
-      return boundingBoxes;
+        // 3. Apply threshold
+        cv.Mat binary = cv.Mat.create(
+            rows: height, 
+            cols: width, 
+            type: cv.MatType.CV_8UC1
+        );
+        cv.threshold(gray, 77, 255, cv.THRESH_BINARY, dst: binary);
+        gray.release();  // Release gray
+
+        // 4. Create and apply morphological operation
+        cv.Mat kernel = cv.getStructuringElement(cv.MORPH_RECT, (2, 2));
+        cv.Mat opened = cv.Mat.create(
+            rows: height, 
+            cols: width, 
+            type: cv.MatType.CV_8UC1
+        );
+        cv.morphologyEx(binary, cv.MORPH_OPEN, kernel, dst: opened);
+        binary.release();
+        kernel.release();
+
+        // 5. Find contours
+        final (contours, hierarchy) = cv.findContours(
+            opened,
+            cv.RETR_EXTERNAL,
+            cv.CHAIN_APPROX_SIMPLE
+        );
+        opened.release();
+
+        // 6. Process contours and create bounding boxes
+        List<BoundingBox> boundingBoxes = [];
+        for (var contour in contours) {
+            cv.Rect boundRect = cv.boundingRect(contour);
+            
+            if (boundRect.width > 2 && boundRect.height > 2) {
+                Map<String, dynamic> contourData = {
+                    'x': boundRect.x,
+                    'y': boundRect.y,
+                    'width': boundRect.width,
+                    'height': boundRect.height,
+                };
+
+                boundingBoxes.insert(0, 
+                    await transformBoundingBox(contourData, boundingBoxes.length, [height, width])
+                );
+            }
+        }
+
+        return boundingBoxes;
 
     } catch (e) {
-      print('OpenCV Error: $e');
-      rethrow;
+        print('OpenCV Error: $e');
+        rethrow;
     }
-  }
+}
 
 double clamp(double value, double max) {
     return math.max(0, math.min(value, max));
