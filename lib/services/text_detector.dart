@@ -1,31 +1,8 @@
 import 'dart:typed_data';
 import 'dart:math' as math;
-import 'dart:collection';
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/bounding_box.dart';
 import '../constants.dart';
-
-class _BBox {
-  int minX = 999999, minY = 999999;
-  int maxX = -1, maxY = -1;
-
-  void update(int x, int y) {
-    minX = math.min(minX, x);
-    minY = math.min(minY, y);
-    maxX = math.max(maxX, x);
-    maxY = math.max(maxY, y);
-  }
-
-  bool isValid() {
-    return maxX >= 0 && maxY >= 0 && maxX > minX && maxY > minY;
-  }
-}
-
-class Point {
-  final int x;
-  final int y;
-  Point(this.x, this.y);
-}
 
 class TextDetector {
   final OrtSession detectionModel;
@@ -46,13 +23,21 @@ class TextDetector {
     if (output == null) {
       throw Exception('Detection model output is null');
     }
+    
+    // Convert nested list to flat Float32List
     final flattenedOutput = _flattenNestedList(output as List);
+    
+    // Apply accurate sigmoid
+    final Float32List sigmoidOutput = Float32List(flattenedOutput.length);
+    for (int i = 0; i < flattenedOutput.length; i++) {
+      sigmoidOutput[i] = 1.0 / (1.0 + math.exp(-flattenedOutput[i]));
+    }
 
     results?.forEach((element) {
       element?.release();
     });
 
-    return _convertToFloat32ListAndApplySigmoidFast(flattenedOutput);
+    return sigmoidOutput;
   }
 
   Float32List _flattenNestedList(List nestedList) {
@@ -70,170 +55,161 @@ class TextDetector {
     return Float32List.fromList(flattened);
   }
 
-  Float32List _convertToFloat32ListAndApplySigmoidFast(Float32List flattened) {
-    final Float32List result = Float32List(flattened.length);
-    
-    // Process in chunks for better cache utilization
-    const chunkSize = 256;
-    
-    for (int chunk = 0; chunk < flattened.length; chunk += chunkSize) {
-      final end = math.min(chunk + chunkSize, flattened.length);
-      
-      for (int i = chunk; i < end; i++) {
-        final x = flattened[i];
-        
-        if (x <= -4.0) {
-          result[i] = 0.0;
-        } else if (x >= 4.0) {
-          result[i] = 1.0;
-        } else {
-          // Fast approximation of sigmoid
-          final xx = x * x;
-          final ax = x.abs();
-          result[i] = 0.5 + (0.197 * x) + (0.108 * xx) / (0.929 + ax + 0.15 * xx);
-        }
-      }
-    }
-    
-    return result;
-  }
-
-  void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
-    final width = OCRConstants.TARGET_SIZE[0];
-    final height = OCRConstants.TARGET_SIZE[1];
-    
-    final queue = Queue<Point>();
-    queue.add(Point(x, y));
-
-    while (queue.isNotEmpty) {
-      final point = queue.removeFirst();
-      final px = point.x;
-      final py = point.y;
-
-      if (px >= 0 && px < width && py >= 0 && py < height && 
-          binaryMap[py][px] && labels[py][px] == -1) {
-        labels[py][px] = label;
-        bbox.update(px, py);
-
-        // Add neighbors in a more efficient order
-        if (px + 1 < width) queue.add(Point(px + 1, py));
-        if (px - 1 >= 0) queue.add(Point(px - 1, py));
-        if (py + 1 < height) queue.add(Point(px, py + 1));
-        if (py - 1 >= 0) queue.add(Point(px, py - 1));
-      }
-    }
-  }
-
   Future<List<BoundingBox>> processImage(Float32List detectionResult) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
-    // 1. Create heatmap from detection result (probability map)
-    final heatmapBytes = await createHeatmapFromProbMap(detectionResult, width, height);
-    
-    // 2. Create binary map from heatmap
-    List<List<bool>> binaryMap = List.generate(
+    // Create binary map with proper thresholding
+    final List<List<bool>> binaryMap = List.generate(
       height,
       (y) => List.generate(
         width,
-        (x) => heatmapBytes[4 * (y * width + x)] > 77  // Using R channel value and threshold of 77
+        (x) => detectionResult[y * width + x] > 0.3 // Adjusted threshold
       ),
     );
 
-    // 3. Extract bounding boxes using flood fill
-    int currentLabel = 0;
-    Map<int, _BBox> components = {};
-    List<List<int>> labels = List.generate(height, (_) => List.filled(width, -1));
+    // Apply morphological operations (simple dilation)
+    final dilatedMap = _dilate(binaryMap);
+    
+    // Find connected components
+    final components = _findConnectedComponents(dilatedMap);
 
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        if (binaryMap[y][x] && labels[y][x] == -1) {
-          _BBox bbox = _BBox();
-          _floodFill(x, y, currentLabel, labels, binaryMap, bbox);
-
-          if (bbox.isValid()) {
-            components[currentLabel] = bbox;
-            currentLabel++;
-          }
-        }
-      }
-    }
-
-    // 4. Transform bounding boxes
-    List<BoundingBox> boundingBoxes = [];
-    for (var entry in components.entries) {
-      var component = entry.value;
-      final boxWidth = component.maxX - component.minX + 1;
-      final boxHeight = component.maxY - component.minY + 1;
-
-      if (boxWidth > 2 && boxHeight > 2) {
-        Map<String, dynamic> contour = {
-          'x': component.minX,
-          'y': component.minY,
-          'width': boxWidth,
-          'height': boxHeight,
-        };
-        
-        boundingBoxes.insert(0, 
-          await transformBoundingBox(contour, boundingBoxes.length, [height, width])
-        );
+    // Convert components to bounding boxes
+    final boundingBoxes = <BoundingBox>[];
+    for (final component in components) {
+      if (_isValidComponent(component)) {
+        final box = await _createBoundingBox(component, boundingBoxes.length, [height, width]);
+        boundingBoxes.add(box);
       }
     }
 
     return boundingBoxes;
   }
 
-  Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
-    // Create RGBA byte array (4 bytes per pixel)
-    final bytes = Uint8List(width * height * 4);
-    
-    for (int i = 0; i < probMap.length; i++) {
-      // Convert probability to pixel value (0-255)
-      final pixelValue = (probMap[i] * 255).round();
-      final j = i * 4;
-      
-      // Set all channels to the same value for grayscale effect
-      bytes[j] = pixelValue;     // R
-      bytes[j + 1] = pixelValue; // G
-      bytes[j + 2] = pixelValue; // B
-      bytes[j + 3] = 255;        // A (fully opaque)
+  List<List<bool>> _dilate(List<List<bool>> input) {
+    final height = input.length;
+    final width = input[0].length;
+    final output = List.generate(
+      height,
+      (y) => List.generate(width, (x) => false),
+    );
+
+    for (int y = 1; y < height - 1; y++) {
+      for (int x = 1; x < width - 1; x++) {
+        output[y][x] = input[y][x] ||
+            input[y - 1][x] ||
+            input[y + 1][x] ||
+            input[y][x - 1] ||
+            input[y][x + 1];
+      }
     }
-    
-    return bytes;
+    return output;
   }
 
-  Future<BoundingBox> transformBoundingBox(Map<String, dynamic> contour, int id, List<int> size) async {
-    double offset = (contour['width'] * contour['height'] * 1.8) / 
-                   (2 * (contour['width'] + contour['height']));
-    
-    double p1 = clamp(contour['x'] - offset, size[1].toDouble()) - 1;
-    double p2 = clamp(p1 + contour['width'] + 2 * offset, size[1].toDouble()) - 1;
-    double p3 = clamp(contour['y'] - offset, size[0].toDouble()) - 1;
-    double p4 = clamp(p3 + contour['height'] + 2 * offset, size[0].toDouble()) - 1;
+  List<_Component> _findConnectedComponents(List<List<bool>> binaryMap) {
+    final height = binaryMap.length;
+    final width = binaryMap[0].length;
+    final visited = List.generate(
+      height,
+      (y) => List.generate(width, (x) => false),
+    );
+    final components = <_Component>[];
 
-    List<List<double>> coordinates = [
-      [p1 / size[1], p3 / size[0]],
-      [p2 / size[1], p3 / size[0]],
-      [p2 / size[1], p4 / size[0]],
-      [p1 / size[1], p4 / size[0]],
-    ];
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        if (binaryMap[y][x] && !visited[y][x]) {
+          final component = _Component();
+          _floodFill(x, y, binaryMap, visited, component);
+          components.add(component);
+        }
+      }
+    }
+
+    return components;
+  }
+
+  void _floodFill(int x, int y, List<List<bool>> binaryMap, List<List<bool>> visited, _Component component) {
+    final queue = <Point>[];
+    queue.add(Point(x, y));
+
+    while (queue.isNotEmpty) {
+      final point = queue.removeAt(0);
+      final px = point.x;
+      final py = point.y;
+
+      if (px >= 0 && px < binaryMap[0].length && py >= 0 && py < binaryMap.length &&
+          binaryMap[py][px] && !visited[py][px]) {
+        visited[py][px] = true;
+        component.addPoint(px, py);
+
+        queue.add(Point(px + 1, py));
+        queue.add(Point(px - 1, py));
+        queue.add(Point(px, py + 1));
+        queue.add(Point(px, py - 1));
+      }
+    }
+  }
+
+  bool _isValidComponent(_Component component) {
+    final width = component.maxX - component.minX + 1;
+    final height = component.maxY - component.minY + 1;
+    final area = width * height;
+    
+    // Filter out components that are too small or have invalid aspect ratios
+    return width > 4 && height > 4 && area > 64 && width / height < 10 && height / width < 10;
+  }
+
+  Future<BoundingBox> _createBoundingBox(_Component component, int id, List<int> size) async {
+    final width = component.maxX - component.minX + 1;
+    final height = component.maxY - component.minY + 1;
+    
+    // Calculate padding based on component size
+    final padding = (width * height * 0.15) / (2 * (width + height));
+    
+    final x1 = _clamp((component.minX - padding) / size[1], 0.0, 1.0);
+    final x2 = _clamp((component.maxX + padding) / size[1], 0.0, 1.0);
+    final y1 = _clamp((component.minY - padding) / size[0], 0.0, 1.0);
+    final y2 = _clamp((component.maxY + padding) / size[0], 0.0, 1.0);
 
     return BoundingBox(
       id: id,
-      x: coordinates[0][0],
-      y: coordinates[0][1],
-      width: coordinates[1][0] - coordinates[0][0],
-      height: coordinates[2][1] - coordinates[0][1],
-      coordinates: coordinates,
-      config: {"stroke": getRandomColor()},
+      x: x1,
+      y: y1,
+      width: x2 - x1,
+      height: y2 - y1,
+      coordinates: [
+        [x1, y1],
+        [x2, y1],
+        [x2, y2],
+        [x1, y2],
+      ],
+      config: {"stroke": _getRandomColor()},
     );
   }
 
-  double clamp(double value, double max) {
-    return math.max(0, math.min(value, max));
+  double _clamp(double value, double min, double max) {
+    return math.max(min, math.min(value, max));
   }
 
-  String getRandomColor() {
+  String _getRandomColor() {
     return '#${(math.Random().nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
   }
+}
+
+class _Component {
+  int minX = 999999, minY = 999999;
+  int maxX = -1, maxY = -1;
+
+  void addPoint(int x, int y) {
+    minX = math.min(minX, x);
+    minY = math.min(minY, y);
+    maxX = math.max(maxX, x);
+    maxY = math.max(maxY, y);
+  }
+}
+
+class Point {
+  final int x;
+  final int y;
+  Point(this.x, this.y);
 }
