@@ -112,24 +112,29 @@ class TextDetector {
   void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
-    final queue = <math.Point<int>>[math.Point(x, y)];
+    
+    // Use more efficient queue implementation
+    final queue = Queue<math.Point<int>>();
+    queue.add(math.Point(x, y));
 
     while (queue.isNotEmpty) {
-      final point = queue.removeLast();
-      final px = point.x;
-      final py = point.y;
+        final point = queue.removeFirst(); // Use removeFirst() for FIFO behavior
+        final px = point.x;
+        final py = point.y;
 
-      if (px >= 0 && px < width && py >= 0 && py < height && binaryMap[py][px] && labels[py][px] == -1) {
-        labels[py][px] = label;
-        bbox.update(px, py);
+        if (px >= 0 && px < width && py >= 0 && py < height && 
+            binaryMap[py][px] && labels[py][px] == -1) {
+            labels[py][px] = label;
+            bbox.update(px, py);
 
-        queue.add(math.Point(px + 1, py));
-        queue.add(math.Point(px - 1, py));
-        queue.add(math.Point(px, py + 1));
-        queue.add(math.Point(px, py - 1));
-      }
+            // Add neighbors in a more efficient order
+            if (px + 1 < width) queue.add(math.Point(px + 1, py));
+            if (px - 1 >= 0) queue.add(math.Point(px - 1, py));
+            if (py + 1 < height) queue.add(math.Point(px, py + 1));
+            if (py - 1 >= 0) queue.add(math.Point(px, py - 1));
+        }
     }
-  }
+}
 
   Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
     final bytes = Uint8List(width * height * 4);
@@ -175,101 +180,57 @@ class TextDetector {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
-    try {
-        // 1. Create source Mat directly from probability map
-        cv.Mat src = cv.Mat.create(
-            rows: height,
-            cols: width,
-            type: cv.MatType.CV_8UC4,
-        );
+    // 1. Create binary map directly from probability map
+    List<List<bool>> binaryMap = List.generate(
+        height,
+        (y) => List.generate(
+            width,
+            (x) => probMap[y * width + x] > 0.3 // Adjust threshold as needed
+        ),
+    );
 
-        // Efficient bulk copy using buffer
-        final buffer = Uint8List(width * height * 4);
-        for (int i = 0; i < probMap.length; i++) {
-            final pixelValue = (probMap[i] * 255).round();
-            final j = i * 4;
-            buffer[j] = pixelValue;     // R
-            buffer[j + 1] = pixelValue; // G
-            buffer[j + 2] = pixelValue; // B
-            buffer[j + 3] = 255;        // A
-        }
-        
-        // Fix: Copy data directly using row-by-row approach
-        for (int row = 0; row < height; row++) {
-            for (int col = 0; col < width; col++) {
-                final bufferIdx = (row * width + col) * 4;
-                src.set(row, col, [
-                    buffer[bufferIdx],     // R
-                    buffer[bufferIdx + 1], // G
-                    buffer[bufferIdx + 2], // B
-                    buffer[bufferIdx + 3]  // A
-                ]);
+    // 2. Extract bounding boxes using flood fill
+    int currentLabel = 0;
+    Map<int, _BBox> components = {};
+    List<List<int>> labels = List.generate(height, (_) => List.filled(width, -1));
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            if (binaryMap[y][x] && labels[y][x] == -1) {
+                _BBox bbox = _BBox();
+                _floodFill(x, y, currentLabel, labels, binaryMap, bbox);
+
+                if (bbox.isValid()) {
+                    components[currentLabel] = bbox;
+                    currentLabel++;
+                }
             }
         }
-
-        // 2. Convert to grayscale
-        cv.Mat gray = cv.Mat.create(
-            rows: height, 
-            cols: width, 
-            type: cv.MatType.CV_8UC1
-        );
-        cv.cvtColor(src, cv.COLOR_RGBA2GRAY, dst: gray);
-        src.release();  // Release src as soon as we're done with it
-
-        // 3. Apply threshold
-        cv.Mat binary = cv.Mat.create(
-            rows: height, 
-            cols: width, 
-            type: cv.MatType.CV_8UC1
-        );
-        cv.threshold(gray, 77, 255, cv.THRESH_BINARY, dst: binary);
-        gray.release();  // Release gray
-
-        // 4. Create and apply morphological operation
-        cv.Mat kernel = cv.getStructuringElement(cv.MORPH_RECT, (2, 2));
-        cv.Mat opened = cv.Mat.create(
-            rows: height, 
-            cols: width, 
-            type: cv.MatType.CV_8UC1
-        );
-        cv.morphologyEx(binary, cv.MORPH_OPEN, kernel, dst: opened);
-        binary.release();
-        kernel.release();
-
-        // 5. Find contours
-        final (contours, hierarchy) = cv.findContours(
-            opened,
-            cv.RETR_EXTERNAL,
-            cv.CHAIN_APPROX_SIMPLE
-        );
-        opened.release();
-
-        // 6. Process contours and create bounding boxes
-        List<BoundingBox> boundingBoxes = [];
-        for (var contour in contours) {
-            cv.Rect boundRect = cv.boundingRect(contour);
-            
-            if (boundRect.width > 2 && boundRect.height > 2) {
-                Map<String, dynamic> contourData = {
-                    'x': boundRect.x,
-                    'y': boundRect.y,
-                    'width': boundRect.width,
-                    'height': boundRect.height,
-                };
-
-                boundingBoxes.insert(0, 
-                    await transformBoundingBox(contourData, boundingBoxes.length, [height, width])
-                );
-            }
-        }
-
-        return boundingBoxes;
-
-    } catch (e) {
-        print('OpenCV Error: $e');
-        rethrow;
     }
-  }
+
+    // 3. Transform bounding boxes
+    List<BoundingBox> boundingBoxes = [];
+    for (var entry in components.entries) {
+        var component = entry.value;
+        final boxWidth = component.maxX - component.minX + 1;
+        final boxHeight = component.maxY - component.minY + 1;
+
+        if (boxWidth > 2 && boxHeight > 2) {
+            Map<String, dynamic> contour = {
+                'x': component.minX,
+                'y': component.minY,
+                'width': boxWidth,
+                'height': boxHeight,
+            };
+            
+            boundingBoxes.insert(0, 
+                await transformBoundingBox(contour, boundingBoxes.length, [height, width])
+            );
+        }
+    }
+
+    return boundingBoxes;
+}
 
 double clamp(double value, double max) {
     return math.max(0, math.min(value, max));
