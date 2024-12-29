@@ -146,7 +146,7 @@ class TextDetector {
     );
   }
 
-Future<List<BoundingBox>> processImage(Float32List probMap) async {
+  Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
@@ -158,12 +158,13 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
       cv.Mat src = cv.Mat.create(
         rows: height,
         cols: width,
-        type: cv.MatType.CV_8UC4,  // Fixed: Use MatType enum
+        type: cv.MatType.CV_8UC4,
       );
       
-      // Create Mat from bytes
-      final length = heatmapBytes.length;
-      src.data.asTypedList(length).setAll(0, heatmapBytes);
+      // Copy bytes directly to Mat - fixing the asTypedList error
+      for (int i = 0; i < heatmapBytes.length; i++) {
+        src.set(i ~/ (width * 4), (i % (width * 4)) ~/ 4, heatmapBytes[i]);
+      }
 
       // 3. Convert to grayscale
       cv.Mat gray = cv.Mat.create(
@@ -226,7 +227,9 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
       List<BoundingBox> boundingBoxes = [];
       
       for (var contour in contours) {
-        cv.Rect boundRect = cv.boundingRect(cv.VecPoint(contour));
+        // Fix: Convert contour points to proper format for boundingRect
+        final points = contour.map((p) => cv.Point(p.x, p.y)).toList();
+        cv.Rect boundRect = cv.boundingRect(points);
         
         if (boundRect.width > 2 && boundRect.height > 2) {
           Map<String, dynamic> contourData = {
@@ -258,11 +261,11 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
     }
   }
 
-  double clamp(double value, double max) {
+double clamp(double value, double max) {
     return math.max(0, math.min(value, max));
   }
 
-  String getRandomColor() {
+String getRandomColor() {
     return '#${(math.Random().nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
   }
 
