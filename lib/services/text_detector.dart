@@ -71,17 +71,61 @@ class TextDetector {
     return result;
   }
 
-  Future<List<BoundingBox>> extractBoundingBoxes(Float32List probMap) async {
-    final List<BoundingBox> boxes = [];
-    final threshold = 0.1;
+
+
+
+
+  Float32List postprocessProbabilityMap(Float32List probMap) {
+    const threshold = 0.1;
+    return Float32List.fromList(
+      probMap.map((prob) => prob > threshold ? 1.0 : 0.0).toList()
+    );
+  }
+
+
+
+
+
+
+  void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
+    final width = OCRConstants.TARGET_SIZE[0];
+    final height = OCRConstants.TARGET_SIZE[1];
+    final queue = <math.Point<int>>[math.Point(x, y)];
+
+    while (queue.isNotEmpty) {
+      final point = queue.removeLast();
+      final px = point.x;
+      final py = point.y;
+
+      if (px >= 0 && px < width && py >= 0 && py < height && binaryMap[py][px] && labels[py][px] == -1) {
+        labels[py][px] = label;
+        bbox.update(px, py);
+
+        queue.add(math.Point(px + 1, py));
+        queue.add(math.Point(px - 1, py));
+        queue.add(math.Point(px, py + 1));
+        queue.add(math.Point(px, py - 1));
+      }
+    }
+  }
+
+  Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
+    // 1. Create heatmap from probability map
+    final heatmapBytes = await createHeatmapFromProbMap(probMap, width, height);
+    
+    // 2. Create binary map from heatmap
     List<List<bool>> binaryMap = List.generate(
       height,
-      (_) => List.generate(width, (x) => probMap[x + _ * width] > threshold),
+      (y) => List.generate(
+        width,
+        (x) => heatmapBytes[4 * (y * width + x)] > 77  // Using R channel value and threshold of 77
+      ),
     );
 
+    // 3. Extract bounding boxes from binary map
     int currentLabel = 0;
     Map<int, _BBox> components = {};
     List<List<int>> labels = List.generate(height, (_) => List.filled(width, -1));
@@ -100,31 +144,32 @@ class TextDetector {
       }
     }
 
-    for (var component in components.values) {
+    // 4. Transform bounding boxes
+    List<BoundingBox> transformedBoxes = [];
+    for (var entry in components.entries) {
+      var component = entry.value;
       final boxWidth = component.maxX - component.minX + 1;
       final boxHeight = component.maxY - component.minY + 1;
 
       if (boxWidth > 2 && boxHeight > 2) {
-        double padding = (boxWidth * boxHeight * 1.8) / (2 * (boxWidth + boxHeight));
-
-        double x1 = math.max(0, (component.minX - padding) / width);
-        double y1 = math.max(0, (component.minY - padding) / height);
-        double x2 = math.min(1.0, (component.maxX + padding) / width);
-        double y2 = math.min(1.0, (component.maxY + padding) / height);
-
-        boxes.add(BoundingBox(
-          x: x1,
-          y: y1,
-          width: x2 - x1,
-          height: y2 - y1,
-        ));
+        Map<String, dynamic> contour = {
+          'x': component.minX,
+          'y': component.minY,
+          'width': boxWidth,
+          'height': boxHeight,
+        };
+        
+        // Add to beginning of list (unshift equivalent)
+        transformedBoxes.insert(0, 
+          await transformBoundingBox(contour, transformedBoxes.length, [height, width])
+        );
       }
     }
 
-    return boxes;
+    return transformedBoxes;
   }
 
-    Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
+  Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
     // Create RGBA byte array (4 bytes per pixel)
     final bytes = Uint8List(width * height * 4);
     
@@ -138,21 +183,6 @@ class TextDetector {
     }
     
     return bytes;
-  }
-
-    Float32List postprocessProbabilityMap(Float32List probMap) {
-    const threshold = 0.1;
-    return Float32List.fromList(
-      probMap.map((prob) => prob > threshold ? 1.0 : 0.0).toList()
-    );
-  }
-
-  String getRandomColor() {
-    return '#${(math.Random().nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
-  }
-
-  double clamp(double value, double max) {
-    return math.max(0, math.min(value, max));
   }
 
   Future<BoundingBox> transformBoundingBox(Map<String, dynamic> contour, int id, List<int> size) async {
@@ -182,56 +212,11 @@ class TextDetector {
     );
   }
 
-
-  void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
-    final width = OCRConstants.TARGET_SIZE[0];
-    final height = OCRConstants.TARGET_SIZE[1];
-    final queue = <math.Point<int>>[math.Point(x, y)];
-
-    while (queue.isNotEmpty) {
-      final point = queue.removeLast();
-      final px = point.x;
-      final py = point.y;
-
-      if (px >= 0 && px < width && py >= 0 && py < height && binaryMap[py][px] && labels[py][px] == -1) {
-        labels[py][px] = label;
-        bbox.update(px, py);
-
-        queue.add(math.Point(px + 1, py));
-        queue.add(math.Point(px - 1, py));
-        queue.add(math.Point(px, py + 1));
-        queue.add(math.Point(px, py - 1));
-      }
-    }
+  double clamp(double value, double max) {
+    return math.max(0, math.min(value, max));
   }
 
-    Future<List<BoundingBox>> processImage(Float32List probMap) async {
-    final width = OCRConstants.TARGET_SIZE[0];
-    final height = OCRConstants.TARGET_SIZE[1];
-
-    // Create heatmap
-    final heatmapBytes = await createHeatmapFromProbMap(probMap, width, height);
-    
-    // Extract bounding boxes using the existing method but with transformed boxes
-    final initialBoxes = await extractBoundingBoxes(probMap);
-    
-    // Transform the boxes and add IDs and styling
-    List<BoundingBox> transformedBoxes = [];
-    for (int i = 0; i < initialBoxes.length; i++) {
-      BoundingBox box = initialBoxes[i];
-      Map<String, dynamic> contour = {
-        'x': (box.x * width).round(),
-        'y': (box.y * height).round(),
-        'width': (box.width * width).round(),
-        'height': (box.height * height).round(),
-      };
-      
-      // Transform and add to the beginning of the list (unshift equivalent)
-      transformedBoxes.insert(0, 
-        await transformBoundingBox(contour, transformedBoxes.length, [height, width])
-      );
-    }
-
-    return transformedBoxes;
+  String getRandomColor() {
+    return '#${(math.Random().nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
   }
 }
