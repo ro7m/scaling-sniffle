@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
+import 'package:opencv_dart/opencv_dart.dart' as cv; 
 import 'package:onnxruntime/onnxruntime.dart';
 import '../models/bounding_box.dart';
 import '../constants.dart';
@@ -82,11 +84,6 @@ class TextDetector {
     );
   }
 
-
-
-
-
-
   void _floodFill(int x, int y, int label, List<List<int>> labels, List<List<bool>> binaryMap, _BBox bbox) {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
@@ -116,57 +113,92 @@ class TextDetector {
     // 1. Create heatmap from probability map
     final heatmapBytes = await createHeatmapFromProbMap(probMap, width, height);
     
-    // 2. Create binary map from heatmap
-    List<List<bool>> binaryMap = List.generate(
-      height,
-      (y) => List.generate(
-        width,
-        (x) => heatmapBytes[4 * (y * width + x)] > 77  // Using R channel value and threshold of 77
-      ),
-    );
+    try {
+      // 2. Create source Mat from heatmap bytes (RGBA)
+      cv.Mat src = cv.Mat.create(
+        rows: height,
+        cols: width,
+        type: cv.MatType.cv8UC4,
+      );
+      src.setDataWithBytes(heatmapBytes);
 
-    // 3. Extract bounding boxes from binary map
-    int currentLabel = 0;
-    Map<int, _BBox> components = {};
-    List<List<int>> labels = List.generate(height, (_) => List.filled(width, -1));
+      // 3. Convert to grayscale
+      cv.Mat gray = cv.Mat.zeros(height, width, cv.MatType.cv8UC1);
+      cv.Imgproc.cvtColor(src, gray, cv.ColorConversionCodes.COLOR_RGBA2GRAY);
 
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        if (binaryMap[y][x] && labels[y][x] == -1) {
-          _BBox bbox = _BBox();
-          _floodFill(x, y, currentLabel, labels, binaryMap, bbox);
+      // 4. Apply threshold
+      cv.Mat binary = cv.Mat.zeros(height, width, cv.MatType.cv8UC1);
+      cv.Imgproc.threshold(
+        gray, 
+        binary,
+        77,  // threshold value
+        255, // max value
+        cv.ThresholdTypes.binary
+      );
 
-          if (bbox.isValid()) {
-            components[currentLabel] = bbox;
-            currentLabel++;
-          }
+      // 5. Create kernel for morphological operation
+      cv.Mat kernel = cv.Imgproc.getStructuringElement(
+        cv.MorphShapes.rect,
+        cv.Size(2, 2)
+      );
+
+      // 6. Apply morphological opening
+      cv.Mat opened = cv.Mat.zeros(height, width, cv.MatType.cv8UC1);
+      cv.Imgproc.morphologyEx(
+        binary,
+        opened,
+        cv.MorphTypes.open,
+        kernel
+      );
+
+      // 7. Find contours
+      List<cv.Point> contours = [];
+      cv.Mat hierarchy = cv.Mat.zeros(1, 1, cv.MatType.cv32SC4);
+      
+      cv.Imgproc.findContours(
+        opened,
+        contours,
+        hierarchy,
+        cv.RetrievalModes.external,
+        cv.ContourApproximationModes.simple
+      );
+
+      // 8. Process contours and create bounding boxes
+      List<BoundingBox> boundingBoxes = [];
+      
+      for (int i = 0; i < contours.length; i++) {
+        cv.Rect boundRect = cv.Imgproc.boundingRect(contours[i]);
+        
+        if (boundRect.width > 2 && boundRect.height > 2) {
+          // Create contour data for transformation
+          Map<String, dynamic> contour = {
+            'x': boundRect.x,
+            'y': boundRect.y,
+            'width': boundRect.width,
+            'height': boundRect.height,
+          };
+
+          // Insert at the beginning (unshift equivalent)
+          boundingBoxes.insert(0, 
+            await transformBoundingBox(contour, boundingBoxes.length, [height, width])
+          );
         }
       }
+
+      // 9. Clean up OpenCV resources
+      src.release();
+      gray.release();
+      binary.release();
+      kernel.release();
+      opened.release();
+      hierarchy.release();
+
+      return boundingBoxes;
+
+    } catch (e) {
+      print('OpenCV Error: $e');
+      rethrow;
     }
-
-    // 4. Transform bounding boxes
-    List<BoundingBox> transformedBoxes = [];
-    for (var entry in components.entries) {
-      var component = entry.value;
-      final boxWidth = component.maxX - component.minX + 1;
-      final boxHeight = component.maxY - component.minY + 1;
-
-      if (boxWidth > 2 && boxHeight > 2) {
-        Map<String, dynamic> contour = {
-          'x': component.minX,
-          'y': component.minY,
-          'width': boxWidth,
-          'height': boxHeight,
-        };
-        
-        // Add to beginning of list (unshift equivalent)
-        transformedBoxes.insert(0, 
-          await transformBoundingBox(contour, transformedBoxes.length, [height, width])
-        );
-      }
-    }
-
-    return transformedBoxes;
   }
 
   Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
