@@ -106,7 +106,7 @@ class TextDetector {
     }
   }
 
-Future<List<BoundingBox>> processImage(Float32List probMap) async {
+  Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
@@ -114,63 +114,67 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final heatmapBytes = await createHeatmapFromProbMap(probMap, width, height);
     
     try {
-      // 2. Create source Mat from heatmap bytes (RGBA)
+      // Fix #1: Create source Mat with correct type
       cv.Mat src = cv.Mat.create(
         rows: height,
         cols: width,
-        type: cv.CV_8UC4,  // Changed from cv.MatType.cv8UC4
+        type: cv.MatType.cvType(8, 4),  // 8-bit 4-channel
       );
       src.setDataWithBytes(heatmapBytes);
 
-      // 3. Convert to grayscale
-      cv.Mat gray = cv.Mat.zeros(height, width, cv.CV_8UC1);  // Changed from cv.MatType.cv8UC1
-      cv.cvtColor(src, gray, cv.CV_RGBA2GRAY);  // Changed from cv.Imgproc.cvtColor and ColorConversionCodes
+      // Fix #2: Create grayscale Mat
+      cv.Mat gray = cv.Mat.zeros(height, width, cv.MatType.cvType(8, 1));  // 8-bit 1-channel
 
-      // 4. Apply threshold
-      cv.Mat binary = cv.Mat.zeros(height, width, cv.CV_8UC1);
-      cv.threshold(  // Changed from cv.Imgproc.threshold
-        gray, 
+      // Fix #3, #4: Convert to grayscale using correct cvtColor syntax
+      cv.cvtColor(src, dst: gray, code: cv.ColorConversionCode.cvColorRgbaGray);
+
+      // Fix #5: Create binary Mat
+      cv.Mat binary = cv.Mat.zeros(height, width, cv.MatType.cvType(8, 1));
+
+      // Fix #6, #7: Apply threshold with correct parameters
+      cv.threshold(
+        gray,
+        dst: binary,
+        thresh: 77,
+        maxval: 255,
+        type: cv.ThresholdType.cvThreshBinary,
+      );
+
+      // Fix #8: Create kernel for morphological operation
+      cv.Mat kernel = cv.getStructuringElement(
+        shape: cv.MorphShape.cvShapeRect,
+        size: cv.Size(2, 2)
+      );
+
+      // Fix #9, #10, #11: Apply morphological opening
+      cv.Mat opened = cv.Mat.zeros(height, width, cv.MatType.cvType(8, 1));
+      cv.morphologyEx(
         binary,
-        77,  // threshold value
-        255, // max value
-        cv.CV_THRESH_BINARY  // Changed from cv.ThresholdTypes.binary
+        dst: opened,
+        op: cv.MorphType.cvMorphOpen,
+        kernel: kernel
       );
 
-      // 5. Create kernel for morphological operation
-      cv.Mat kernel = cv.getStructuringElement(  // Changed from cv.Imgproc.getStructuringElement
-        cv.CV_SHAPE_RECT,  // Changed from cv.MorphShapes.rect
-        cv.Size(2, 2)
-      );
-
-      // 6. Apply morphological opening
-      cv.Mat opened = cv.Mat.zeros(height, width, cv.CV_8UC1);
-      cv.morphologyEx(  // Changed from cv.Imgproc.morphologyEx
-        binary,
-        opened,
-        cv.CV_MORPH_OPEN,  // Changed from cv.MorphTypes.open
-        kernel
-      );
-
-      // 7. Find contours
-      List<cv.Point> contours = [];
-      cv.Mat hierarchy = cv.Mat.zeros(1, 1, cv.CV_32SC4);
+      // Find contours - using updated API
+      List<List<cv.Point>> contours = [];
+      cv.Mat hierarchy = cv.Mat.zeros(1, 1, cv.MatType.cvType(32, 1));
       
-      cv.findContours(  // Changed from cv.Imgproc.findContours
+      cv.findContours(
         opened,
-        contours,
-        hierarchy,
-        cv.CV_RETR_EXTERNAL,  // Changed from cv.RetrievalModes.external
-        cv.CV_CHAIN_APPROX_SIMPLE  // Changed from cv.ContourApproximationModes.simple
+        contours: contours,
+        hierarchy: hierarchy,
+        mode: cv.ContourRetrievalMode.cvRetrExternal,
+        method: cv.ContourApproximationMode.cvChainApproxSimple
       );
 
-      // 8. Process contours and create bounding boxes
+      // Process contours and create bounding boxes
       List<BoundingBox> boundingBoxes = [];
       
-      for (int i = 0; i < contours.length; i++) {
-        cv.Rect boundRect = cv.boundingRect(contours[i]);  // Changed from cv.Imgproc.boundingRect
+      for (var contour in contours) {
+        cv.Rect boundRect = cv.boundingRect(contour);
         
         if (boundRect.width > 2 && boundRect.height > 2) {
-          Map<String, dynamic> contour = {
+          Map<String, dynamic> contourData = {
             'x': boundRect.x,
             'y': boundRect.y,
             'width': boundRect.width,
@@ -178,12 +182,12 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
           };
 
           boundingBoxes.insert(0, 
-            await transformBoundingBox(contour, boundingBoxes.length, [height, width])
+            await transformBoundingBox(contourData, boundingBoxes.length, [height, width])
           );
         }
       }
 
-      // 9. Clean up OpenCV resources
+      // Clean up OpenCV resources
       src.release();
       gray.release();
       binary.release();
@@ -199,49 +203,6 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
     }
   }
 
-  Future<Uint8List> createHeatmapFromProbMap(Float32List probMap, int width, int height) async {
-    // Create RGBA byte array (4 bytes per pixel)
-    final bytes = Uint8List(width * height * 4);
-    
-    for (int i = 0; i < probMap.length; i++) {
-      final pixelValue = (probMap[i] * 255).round();
-      final j = i * 4;
-      bytes[j] = pixelValue;     // R
-      bytes[j + 1] = pixelValue; // G
-      bytes[j + 2] = pixelValue; // B
-      bytes[j + 3] = 255;        // A
-    }
-    
-    return bytes;
-  }
-
-  Future<BoundingBox> transformBoundingBox(Map<String, dynamic> contour, int id, List<int> size) async {
-    double offset = (contour['width'] * contour['height'] * 1.8) / 
-                   (2 * (contour['width'] + contour['height']));
-    
-    double p1 = clamp(contour['x'] - offset, size[1].toDouble()) - 1;
-    double p2 = clamp(p1 + contour['width'] + 2 * offset, size[1].toDouble()) - 1;
-    double p3 = clamp(contour['y'] - offset, size[0].toDouble()) - 1;
-    double p4 = clamp(p3 + contour['height'] + 2 * offset, size[0].toDouble()) - 1;
-
-    List<List<double>> coordinates = [
-      [p1 / size[1], p3 / size[0]],
-      [p2 / size[1], p3 / size[0]],
-      [p2 / size[1], p4 / size[0]],
-      [p1 / size[1], p4 / size[0]],
-    ];
-
-    return BoundingBox(
-      id: id,
-      x: coordinates[0][0],
-      y: coordinates[0][1],
-      width: coordinates[1][0] - coordinates[0][0],
-      height: coordinates[2][1] - coordinates[0][1],
-      coordinates: coordinates,
-      config: {"stroke": getRandomColor()},
-    );
-  }
-
   double clamp(double value, double max) {
     return math.max(0, math.min(value, max));
   }
@@ -249,4 +210,5 @@ Future<List<BoundingBox>> processImage(Float32List probMap) async {
   String getRandomColor() {
     return '#${(math.Random().nextDouble() * 0xFFFFFF).toInt().toRadixString(16).padLeft(6, '0')}';
   }
+
 }
