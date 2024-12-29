@@ -146,7 +146,7 @@ class TextDetector {
     );
   }
 
-  Future<List<BoundingBox>> processImage(Float32List probMap) async {
+Future<List<BoundingBox>> processImage(Float32List probMap) async {
     final width = OCRConstants.TARGET_SIZE[0];
     final height = OCRConstants.TARGET_SIZE[1];
 
@@ -161,7 +161,7 @@ class TextDetector {
         type: cv.MatType.CV_8UC4,
       );
       
-      // Copy bytes directly to Mat - fixing the asTypedList error
+      // Copy bytes directly to Mat
       for (int i = 0; i < heatmapBytes.length; i++) {
         src.set(i ~/ (width * 4), (i % (width * 4)) ~/ 4, heatmapBytes[i]);
       }
@@ -227,9 +227,11 @@ class TextDetector {
       List<BoundingBox> boundingBoxes = [];
       
       for (var contour in contours) {
-        // Fix: Convert contour points to proper format for boundingRect
-        final points = contour.map((p) => cv.Point(p.x, p.y)).toList();
-        cv.Rect boundRect = cv.boundingRect(points);
+        // Fix: Properly create VecPoint from contour points
+        final vecPoints = cv.VecPoint.fromPoints(
+          contour.map((p) => cv.Point(p.x, p.y)).toList()
+        );
+        cv.Rect boundRect = cv.boundingRect(vecPoints);
         
         if (boundRect.width > 2 && boundRect.height > 2) {
           Map<String, dynamic> contourData = {
@@ -243,6 +245,9 @@ class TextDetector {
             await transformBoundingBox(contourData, boundingBoxes.length, [height, width])
           );
         }
+        
+        // Clean up VecPoint
+        vecPoints.dispose();
       }
 
       // 9. Clean up OpenCV resources
