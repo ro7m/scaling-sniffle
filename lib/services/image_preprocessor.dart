@@ -40,96 +40,113 @@ class ImagePreprocessor {
   }
 
   // Preprocess image for recognition
-  Future<Float32List> preprocessForRecognition(List<ui.Image> crops) async {
-    final targetHeight = OCRConstants.REC_TARGET_SIZE[0];
-    final targetWidth = OCRConstants.REC_TARGET_SIZE[1];
-    
+Future<Map<String, dynamic>> preprocessImageForRecognition(
+    List<ui.Image> crops, {
+    List<int> targetSize = const [32, 128],
+    List<double> mean = const [0.694, 0.695, 0.693],
+    List<double> std = const [0.299, 0.296, 0.301],
+  }) async {
     // Process each crop
-    final List<Float32List> processedImages = [];
-    
-    for (final image in crops) {
-      // Calculate resize dimensions while maintaining aspect ratio
-      double resizedWidth, resizedHeight;
-      final aspectRatio = targetWidth / targetHeight;
+    List<Float32List> processedImages = await Future.wait(
+      crops.map((crop) => _processImage(crop, targetSize, mean, std))
+    );
 
-      if (aspectRatio * image.height > image.width) {
-        resizedHeight = targetHeight.toDouble();
-        resizedWidth = (targetHeight * image.width / image.height).roundToDouble();
-      } else {
-        resizedWidth = targetWidth.toDouble();
-        resizedHeight = (targetWidth * image.height / image.width).roundToDouble();
-      }
-
-      // Create black canvas
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(recorder);
-      
-      // Fill with black background
-      canvas.drawRect(
-        ui.Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()),
-        ui.Paint()..color = ui.Color(0xFF000000),
-      );
-
-      // Center the image
-      final xOffset = ((targetWidth - resizedWidth) / 2).roundToDouble();
-      final yOffset = ((targetHeight - resizedHeight) / 2).roundToDouble();
-      
-      // Draw resized image
-      canvas.drawImageRect(
-        image,
-        ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-        ui.Rect.fromLTWH(xOffset, yOffset, resizedWidth, resizedHeight),
-        ui.Paint(),
-      );
-
-      final picture = recorder.endRecording();
-      final resizedImage = await picture.toImage(targetWidth, targetHeight);
-      final byteData = await resizedImage.toByteData(format: ui.ImageByteFormat.rawRgba);
-
-      if (byteData == null) {
-        throw Exception('Failed to get byte data from image');
-      }
-
-      final pixels = byteData.buffer.asUint8List();
-      final Float32List processedData = Float32List(3 * targetWidth * targetHeight);
-      
-      // Normalize and separate channels
-      for (int y = 0; y < targetHeight; y++) {
-        for (int x = 0; x < targetWidth; x++) {
-          final pixelIndex = (y * targetWidth + x) * 4;
-          final channelSize = targetHeight * targetWidth;
-          
-          // RGB normalization using REC_MEAN and REC_STD
-          processedData[y * targetWidth + x] = 
-              (pixels[pixelIndex] / 255.0 - OCRConstants.REC_MEAN[0]) / OCRConstants.REC_STD[0];
-          processedData[channelSize + y * targetWidth + x] = 
-              (pixels[pixelIndex + 1] / 255.0 - OCRConstants.REC_MEAN[1]) / OCRConstants.REC_STD[1];
-          processedData[2 * channelSize + y * targetWidth + x] = 
-              (pixels[pixelIndex + 2] / 255.0 - OCRConstants.REC_MEAN[2]) / OCRConstants.REC_STD[2];
-        }
-      }
-      
-      processedImages.add(processedData);
-    }
-
-    // Combine processed images for batch processing
+    // Concatenate multiple processed images if needed
     if (processedImages.length > 1) {
-      final combinedLength = 3 * targetHeight * targetWidth * processedImages.length;
+      final combinedLength = 3 * targetSize[0] * targetSize[1] * processedImages.length;
       final combinedData = Float32List(combinedLength);
-      
+
       for (int i = 0; i < processedImages.length; i++) {
-        combinedData.setRange(
-          i * processedImages[i].length, 
-          (i + 1) * processedImages[i].length, 
-          processedImages[i]
-        );
+        combinedData.setAll(i * processedImages[i].length, processedImages[i]);
       }
 
-      return combinedData;
-        
+      return {
+        'data': combinedData,
+        'dims': [processedImages.length, 3, targetSize[0], targetSize[1]],
+      };
     }
 
     // Single image case
-    return processedImages
-      
+    return {
+      'data': processedImages[0],
+      'dims': [1, 3, targetSize[0], targetSize[1]],
+    };
+  }
+
+  Future<Float32List> _processImage(
+    ui.Image image,
+    List<int> targetSize,
+    List<double> mean,
+    List<double> std,
+  ) async {
+    final targetHeight = targetSize[0];
+    final targetWidth = targetSize[1];
+
+    // Calculate resize dimensions
+    double resizedWidth, resizedHeight;
+    final aspectRatio = targetWidth / targetHeight;
+
+    if (aspectRatio * image.height > image.width) {
+      resizedHeight = targetHeight.toDouble();
+      resizedWidth = ((targetHeight * image.width) / image.height).roundToDouble();
+    } else {
+      resizedWidth = targetWidth.toDouble();
+      resizedHeight = ((targetWidth * image.height) / image.width).roundToDouble();
+    }
+
+    // Create a new canvas with black background
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+
+    // Fill with black background
+    canvas.drawRect(
+      ui.Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble()),
+      ui.Paint()..color = ui.Color(0xFF000000),
+    );
+
+    // Calculate offsets for centering
+    final xOffset = ((targetWidth - resizedWidth) / 2).floor().toDouble();
+    final yOffset = ((targetHeight - resizedHeight) / 2).floor().toDouble();
+
+    // Draw resized image
+    canvas.drawImageRect(
+      image,
+      ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      ui.Rect.fromLTWH(xOffset, yOffset, resizedWidth, resizedHeight),
+      ui.Paint(),
+    );
+
+    // Get the image data
+    final picture = recorder.endRecording();
+    final resizedImage = await picture.toImage(targetWidth, targetHeight);
+    final byteData = await resizedImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+
+    if (byteData == null) {
+      throw Exception('Failed to get byte data from image');
+    }
+
+    final pixels = byteData.buffer.asUint8List();
+    final Float32List float32Data = Float32List(3 * targetHeight * targetWidth);
+
+    // Normalize and separate channels
+    for (int y = 0; y < targetHeight; y++) {
+      for (int x = 0; x < targetWidth; x++) {
+        final pixelIndex = (y * targetWidth + x) * 4;
+        final channelSize = targetHeight * targetWidth;
+
+        // Extract RGB and normalize
+        final r = (pixels[pixelIndex] / 255.0 - mean[0]) / std[0];
+        final g = (pixels[pixelIndex + 1] / 255.0 - mean[1]) / std[1];
+        final b = (pixels[pixelIndex + 2] / 255.0 - mean[2]) / std[2];
+
+        // Store normalized values in float32Data
+        float32Data[y * targetWidth + x] = r;
+        float32Data[channelSize + y * targetWidth + x] = g;
+        float32Data[2 * channelSize + y * targetWidth + x] = b;
+      }
+    }
+
+    return float32Data;
+  }
+
 }

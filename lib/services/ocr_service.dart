@@ -51,24 +51,32 @@ class OCRService {
         return [];
       }
 
-      final results = <OCRResult>[];
-      for (var box in boundingBoxes) {
-        try {
-          final croppedImage = await _cropImage(image, box);
-          final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
-          final text = await textRecognizer!.recognizeText(preprocessedCrop);
-          if (text.isNotEmpty) {
-            results.add(OCRResult(text: text, boundingBox: box));
-          }
-        } catch (e) {
-          debugCallback?.call('Error processing box: $e');
-          continue;
-        }
-      }
+  final results = <OCRResult>[];
+  final List<ui.Image> crops = [];
+  
+  for (var box in boundingBoxes) {
+    try {
+      final croppedImage = await _cropImage(image, box);
+      crops.add(croppedImage);
+    } catch (e) {
+      debugCallback?.call('Error cropping image: $e');
+    }
+  }
 
-      debugCallback?.call('Processed ${results.length} text regions');
-      return results;
-    } catch (e, stack) {
+  if (crops.isNotEmpty) {
+    final preprocessed = await imagePreprocessor.preprocessImageForRecognition(crops);
+    final texts = await textRecognizer!.recognizeText(preprocessed['data'] as Float32List);
+    
+    for (int i = 0; i < texts.length; i++) {
+      if (texts[i].isNotEmpty) {
+        results.add(OCRResult(text: texts[i], boundingBox: boundingBoxes[i]));
+      }
+    }
+  }
+
+  debugCallback?.call('Processed ${results.length} text regions');
+  return results;
+  } catch (e, stack) {
       debugCallback?.call('Error in processImage: $e\n$stack');
       throw Exception('Error in processImage: $e');
     }
