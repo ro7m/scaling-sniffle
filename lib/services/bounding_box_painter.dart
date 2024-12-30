@@ -5,71 +5,76 @@ import '../models/bounding_box.dart';
 class BoundingBoxPainter extends CustomPainter {
   final ui.Image image;
   final List<BoundingBox> boundingBoxes;
-  final Color Function(String) parseColor; // Add color parser function
+  final Size screenSize;
 
   BoundingBoxPainter({
     required this.image,
     required this.boundingBoxes,
-    required this.parseColor, // Required in constructor
+    required this.screenSize,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final imageSize = Size(image.width.toDouble(), image.height.toDouble());
-    final fitSize = _calculateFitSize(imageSize, size);
-    final rect = _centerRect(fitSize, size);
+    // Calculate scale factors to fit image to screen while maintaining aspect ratio
+    double scaleX = screenSize.width / image.width;
+    double scaleY = screenSize.height / image.height;
+    double scale = scaleX < scaleY ? scaleX : scaleY;
+
+    // Calculate centered position
+    double left = (screenSize.width - (image.width * scale)) / 2;
+    double top = (screenSize.height - (image.height * scale)) / 2;
+
+    // Draw the image
+    final rect = Rect.fromLTWH(left, top, image.width * scale, image.height * scale);
     canvas.drawImage(image, rect.topLeft, Paint());
 
+    // Draw bounding boxes
     for (var box in boundingBoxes) {
-      final paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0
-        ..color = parseColor(box.config?['stroke'] ?? '#FF0000');
-
       if (box.coordinates != null) {
-        final points = box.coordinates!.map((coord) => Offset(
-              coord[0] * rect.width + rect.left,
-              coord[1] * rect.height + rect.top,
-            )).toList();
+        final paint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0
+          ..color = _parseColor(box.config?['stroke'] ?? '#FF0000');
 
         final path = Path();
-        path.moveTo(points[0].dx, points[0].dy);
-        for (int i = 1; i < points.length; i++) {
-          path.lineTo(points[i].dx, points[i].dy);
+        bool isFirst = true;
+        
+        for (var coord in box.coordinates!) {
+          final double x = (coord[0] * image.width * scale) + left;
+          final double y = (coord[1] * image.height * scale) + top;
+          
+          if (isFirst) {
+            path.moveTo(x, y);
+            isFirst = false;
+          } else {
+            path.lineTo(x, y);
+          }
         }
+        
         path.close();
         canvas.drawPath(path, paint);
       }
     }
   }
 
-  Rect _centerRect(Size fitSize, Size size) {
-    final left = (size.width - fitSize.width) / 2;
-    final top = (size.height - fitSize.height) / 2;
-    return Rect.fromLTWH(left, top, fitSize.width, fitSize.height);
-  }
-
-  Size _calculateFitSize(Size imageSize, Size boxSize) {
-    final imageAspectRatio = imageSize.width / imageSize.height;
-    final boxAspectRatio = boxSize.width / boxSize.height;
-
-    late double fitWidth;
-    late double fitHeight;
-
-    if (imageAspectRatio > boxAspectRatio) {
-      fitWidth = boxSize.width;
-      fitHeight = fitWidth / imageAspectRatio;
-    } else {
-      fitHeight = boxSize.height;
-      fitWidth = fitHeight * imageAspectRatio;
+  Color _parseColor(String colorStr) {
+    try {
+      if (colorStr.startsWith('#')) {
+        colorStr = colorStr.substring(1);
+      }
+      if (colorStr.length == 6) {
+        return Color(int.parse('FF$colorStr', radix: 16));
+      }
+      return Colors.red;
+    } catch (e) {
+      return Colors.red;
     }
-
-    return Size(fitWidth, fitHeight);
   }
 
   @override
   bool shouldRepaint(BoundingBoxPainter oldDelegate) {
     return oldDelegate.image != image || 
-           oldDelegate.boundingBoxes != boundingBoxes;
+           oldDelegate.boundingBoxes != boundingBoxes ||
+           oldDelegate.screenSize != screenSize;
   }
 }

@@ -9,14 +9,13 @@ import '../services/bounding_box_painter.dart';
 class PreviewScreen extends StatefulWidget {
   final XFile image;
 
-  PreviewScreen({required this.image});
+  const PreviewScreen({Key? key, required this.image}) : super(key: key);
 
   @override
   _PreviewScreenState createState() => _PreviewScreenState();
 }
 
 class _PreviewScreenState extends State<PreviewScreen> {
-  final OCRService _ocrService = OCRService();
   List<BoundingBox> _boundingBoxes = [];
   String _extractedText = '';
   ui.Image? _decodedImage;
@@ -26,7 +25,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
   @override
   void initState() {
     super.initState();
-    _ocrService.setDebugCallback = _addDebugMessage;
     _processImage();
   }
 
@@ -37,43 +35,24 @@ class _PreviewScreenState extends State<PreviewScreen> {
     print(message);
   }
 
-  Color _parseColor(String colorStr) {
-    try {
-      if (colorStr.startsWith('#')) {
-        colorStr = colorStr.substring(1);
-      }
-      if (colorStr.length == 6) {
-        return Color(int.parse('FF$colorStr', radix: 16));
-      }
-      return Colors.red; // Default color
-    } catch (e) {
-      return Colors.red; // Default color on error
-    }
-  }
-
   Future<void> _processImage() async {
     try {
       setState(() {
         _isProcessing = true;
       });
 
-      await _ocrService.loadModels(debugCallback: _addDebugMessage);
-      
       // Load and decode the image
       final imageBytes = await widget.image.readAsBytes();
       final ui.Codec codec = await ui.instantiateImageCodec(imageBytes);
       final ui.FrameInfo frameInfo = await codec.getNextFrame();
+      
       setState(() {
         _decodedImage = frameInfo.image;
       });
 
-      if (_decodedImage != null) {
-        final results = await _ocrService.processImage(_decodedImage!, debugCallback: _addDebugMessage);
-        setState(() {
-          _boundingBoxes = results.map((r) => r.boundingBox).toList();
-          _extractedText = results.map((r) => r.text).join('\n');
-        });
-      }
+      // Process OCR here and update _boundingBoxes and _extractedText
+      // Add your OCR processing logic here
+      
     } catch (e, stackTrace) {
       _addDebugMessage('Error: $e\n$stackTrace');
     } finally {
@@ -85,32 +64,28 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('OCR Preview'),
       ),
       body: Stack(
+        fit: StackFit.expand,
         children: [
           if (_decodedImage != null)
-            Center(
-              child: CustomPaint(
-                painter: BoundingBoxPainter(
-                  image: _decodedImage!,
-                  boundingBoxes: _boundingBoxes,
-                  parseColor: _parseColor, // Pass the color parser function
-                ),
-                size: Size(
-                  MediaQuery.of(context).size.width,
-                  MediaQuery.of(context).size.height,
-                ),
+            CustomPaint(
+              painter: BoundingBoxPainter(
+                image: _decodedImage!,
+                boundingBoxes: _boundingBoxes,
+                screenSize: size,
               ),
+              size: size,
             )
-          else
-            Center(
-              child: Image.file(
-                File(widget.image.path),
-                fit: BoxFit.contain,
-              ),
+          else if (!_isProcessing)
+            Image.file(
+              File(widget.image.path),
+              fit: BoxFit.contain,
             ),
           if (_isProcessing)
             const Center(
