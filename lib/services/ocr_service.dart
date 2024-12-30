@@ -1,10 +1,11 @@
 import 'dart:ui' as ui;
-import '../models/ocr_result.dart';
-import '../models/bounding_box.dart';
+import 'package:image_picker/image_picker.dart'; // Add this import
 import 'model_loader.dart';
 import 'image_preprocessor.dart';
 import 'text_detector.dart';
 import 'text_recognizer.dart';
+import '../models/ocr_result.dart';
+import 'dart:io';
 
 class OCRService {
   final ModelLoader modelLoader = ModelLoader();
@@ -28,10 +29,12 @@ class OCRService {
     try {
       debugCallback?.call('Starting image processing...');
 
-      final bytes = await imageFile.readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frameInfo = await codec.getNextFrame();
-      final image - frameInfo.image;
+      // Load image from file
+      final File file = File(imageFile.path);
+      final List<int> bytes = await file.readAsBytes();
+      final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+      final ui.FrameInfo frameInfo = await codec.getNextFrame();
+      final ui.Image image = frameInfo.image;
 
       final preprocessedImage = await imagePreprocessor.preprocessForDetection(image);
       debugCallback?.call('Image preprocessed for detection');
@@ -49,10 +52,10 @@ class OCRService {
       final results = <OCRResult>[];
       for (var box in boundingBoxes) {
         final croppedImage = await _cropImage(image, box);
-        final preprocessedCrop = await imagePreprocessor.preprocessForRecognition([croppedImage]);
+        final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
         final text = await textRecognizer!.recognizeText(preprocessedCrop);
         if (text.isNotEmpty) {
-          results.add(OCRResult(text: text[0], boundingBox: box));
+          results.add(OCRResult(text: text, boundingBox: box));
         }
       }
 
@@ -105,6 +108,6 @@ class OCRService {
     );
 
     final picture = recorder.endRecording();
-    return await picture.toImage(targetWidth.toInt(), targetHeight.toInt());
+    return await picture.toImage(targetWidth.round(), targetHeight.round());
   }
 }
