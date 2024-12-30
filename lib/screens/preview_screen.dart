@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
-import 'package:camera/camera.dart';
+import 'dart:io';
+import 'package:camera/camera';
 import '../services/ocr_service.dart';
 import '../models/bounding_box.dart';
+import '../services/bounding_box_painter.dart';
 
 class PreviewScreen extends StatefulWidget {
   final XFile image;
@@ -18,8 +20,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
   List<BoundingBox> _boundingBoxes = [];
   String _extractedText = '';
   ui.Image? _decodedImage;
-  Size? _imageSize;
-  bool _isLoading = true;
+  bool _isProcessing = true;
+  String _debugText = '';
 
   @override
   void initState() {
@@ -29,34 +31,55 @@ class _PreviewScreenState extends State<PreviewScreen> {
   }
 
   void _addDebugMessage(String message) {
+    setState(() {
+      _debugText += '$message\n';
+    });
     print(message);
   }
 
   Future<void> _processImage() async {
     try {
+      setState(() {
+        _isProcessing = true;
+      });
+
       await _ocrService.loadModels(debugCallback: _addDebugMessage);
+      
+      // Load and decode the image
       final imageBytes = await widget.image.readAsBytes();
       final ui.Codec codec = await ui.instantiateImageCodec(imageBytes);
       final ui.FrameInfo frameInfo = await codec.getNextFrame();
-      _decodedImage = frameInfo.image;
-      
-      // Store original image dimensions
-      _imageSize = Size(_decodedImage!.width.toDouble(), _decodedImage!.height.toDouble());
-      
-      final results = await _ocrService.processImage(_decodedImage!, debugCallback: _addDebugMessage);
-      
-      if (mounted) {
+      setState(() {
+        _decodedImage = frameInfo.image;
+      });
+
+      if (_decodedImage != null) {
+        final results = await _ocrService.processImage(_decodedImage!, debugCallback: _addDebugMessage);
         setState(() {
           _boundingBoxes = results.map((r) => r.boundingBox).toList();
           _extractedText = results.map((r) => r.text).join('\n');
-          _isLoading = false;
         });
       }
-    } catch (e) {
-      print('Error processing image: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
+    } catch (e, stackTrace) {
+      _addDebugMessage('Error: $e\n$stackTrace');
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
+  }
+
+  Color _parseColor(String colorStr) {
+    try {
+      if (colorStr.startsWith('#')) {
+        colorStr = colorStr.substring(1);
       }
+      if (colorStr.length == 6) {
+        return Color(int.parse('FF$colorStr', radix: 16));
+      }
+      return Colors.red; // Default color
+    } catch (e) {
+      return Colors.red; // Default color on error
     }
   }
 
@@ -64,119 +87,123 @@ class _PreviewScreenState extends State<PreviewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('OCR Preview'),
+        title: const Text('OCR Preview'),
       ),
-      body: _isLoading 
-          ? Center(child: CircularProgressIndicator())
-          : _buildPreviewContent(),
-    );
-  }
-
-  Widget _buildPreviewContent() {
-    if (_decodedImage == null || _imageSize == null) {
-      return Center(child: Text('Failed to load image'));
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Calculate scaling to fit the screen while maintaining aspect ratio
-        final double screenAspectRatio = constraints.maxWidth / constraints.maxHeight;
-        final double imageAspectRatio = _imageSize!.width / _imageSize!.height;
-        
-        late double scaledWidth;
-        late double scaledHeight;
-        
-        if (screenAspectRatio > imageAspectRatio) {
-          // Screen is wider than image
-          scaledHeight = constraints.maxHeight;
-          scaledWidth = scaledHeight * imageAspectRatio;
-        } else {
-          // Screen is taller than image
-          scaledWidth = constraints.maxWidth;
-          scaledHeight = scaledWidth / imageAspectRatio;
-        }
-
-        return Center(
-          child: SizedBox(
-            width: scaledWidth,
-            height: scaledHeight,
-            child: Stack(
-              children: [
-                // Original image
-                Image.file(
-                  File(widget.image.path),
-                  width: scaledWidth,
-                  height: scaledHeight,
-                  fit: BoxFit.fill,
+      body: Stack(
+        children: [
+          if (_decodedImage != null)
+            Center(
+              child: CustomPaint(
+                painter: BoundingBoxPainter(
+                  image: _decodedImage!,
+                  boundingBoxes: _boundingBoxes,
                 ),
-                // Bounding boxes overlay
-                CustomPaint(
-                  size: Size(scaledWidth, scaledHeight),
-                  painter: BoundingBoxPainter(
-                    boundingBoxes: _boundingBoxes,
-                    scale: Size(
-                      scaledWidth / _imageSize!.width,
-                      scaledHeight / _imageSize!.height,
-                    ),
-                  ),
+                size: Size(
+                  MediaQuery.of(context).size.width,
+                  MediaQuery.of(context).size.height,
                 ),
-              ],
+              ),
+            )
+          else
+            Center(
+              child: Image.file(
+                File(widget.image.path), // Now File is properly imported
+                fit: BoxFit.contain,
+              ),
             ),
-          ),
-        );
-      },
+          if (_isProcessing)
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
+          // Display extracted text
+          if (_extractedText.isNotEmpty)
+            Positioned(
+              bottom: 20,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                color: Colors.black.withOpacity(0.7),
+                child: Text(
+                  _extractedText,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
 
 class BoundingBoxPainter extends CustomPainter {
+  final ui.Image image;
   final List<BoundingBox> boundingBoxes;
-  final Size scale;
 
   BoundingBoxPainter({
+    required this.image,
     required this.boundingBoxes,
-    required this.scale,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Draw the image
+    final imageSize = Size(image.width.toDouble(), image.height.toDouble());
+    final fitSize = _calculateFitSize(imageSize, size);
+    final rect = _centerRect(fitSize, size);
+    canvas.drawImage(image, rect.topLeft, Paint());
+
+    // Draw bounding boxes
     for (var box in boundingBoxes) {
       final paint = Paint()
-        ..color = _parseColor(box.config['stroke'] ?? '#FF0000')
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0;
+        ..strokeWidth = 2.0
+        ..color = _parseColor(box.config?['stroke'] ?? '#FF0000');
 
-      // Convert normalized coordinates to actual pixels
-      final points = box.coordinates.map((coord) => Offset(
-        coord[0] * size.width,
-        coord[1] * size.height,
-      )).toList();
+      if (box.coordinates != null) {
+        final points = box.coordinates!.map((coord) => Offset(
+              coord[0] * rect.width + rect.left,
+              coord[1] * rect.height + rect.top,
+            )).toList();
 
-      // Draw the box
-      final path = Path()
-        ..moveTo(points[0].dx, points[0].dy)
-        ..lineTo(points[1].dx, points[1].dy)
-        ..lineTo(points[2].dx, points[2].dy)
-        ..lineTo(points[3].dx, points[3].dy)
-        ..close();
-
-      canvas.drawPath(path, paint);
+        // Draw the box
+        final path = Path();
+        path.moveTo(points[0].dx, points[0].dy);
+        for (int i = 1; i < points.length; i++) {
+          path.lineTo(points[i].dx, points[i].dy);
+        }
+        path.close();
+        canvas.drawPath(path, paint);
+      }
     }
   }
 
-  Color _parseColor(String hexColor) {
-    try {
-      hexColor = hexColor.replaceAll('#', '');
-      if (hexColor.length == 6) {
-        return Color(int.parse('FF$hexColor', radix: 16));
-      }
-      return Colors.red;
-    } catch (e) {
-      return Colors.red;
+  Rect _centerRect(Size fitSize, Size size) {
+    final left = (size.width - fitSize.width) / 2;
+    final top = (size.height - fitSize.height) / 2;
+    return Rect.fromLTWH(left, top, fitSize.width, fitSize.height);
+  }
+
+  Size _calculateFitSize(Size imageSize, Size boxSize) {
+    final imageAspectRatio = imageSize.width / imageSize.height;
+    final boxAspectRatio = boxSize.width / boxSize.height;
+
+    late double fitWidth;
+    late double fitHeight;
+
+    if (imageAspectRatio > boxAspectRatio) {
+      fitWidth = boxSize.width;
+      fitHeight = fitWidth / imageAspectRatio;
+    } else {
+      fitHeight = boxSize.height;
+      fitWidth = fitHeight * imageAspectRatio;
     }
+
+    return Size(fitWidth, fitHeight);
   }
 
   @override
-  bool shouldRepaint(BoundingBoxPainter oldDelegate) =>
-      boundingBoxes != oldDelegate.boundingBoxes || scale != oldDelegate.scale;
+  bool shouldRepaint(BoundingBoxPainter oldDelegate) {
+    return oldDelegate.image != image || oldDelegate.boundingBoxes != boundingBoxes;
+  }
 }
