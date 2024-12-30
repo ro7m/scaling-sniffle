@@ -40,7 +40,7 @@ class ImagePreprocessor {
   }
 
   // Preprocess image for recognition
-  Future<Map<String, dynamic>> preprocessForRecognition(List<ui.Image> crops) async {
+  Future<Float32List> preprocessForRecognition(List<ui.Image> crops) async {
     final targetHeight = OCRConstants.REC_TARGET_SIZE[0];
     final targetWidth = OCRConstants.REC_TARGET_SIZE[1];
     
@@ -125,16 +125,11 @@ class ImagePreprocessor {
         );
       }
 
-      return {
-        'data': combinedData,
-        'dims': [processedImages.length, 3, targetHeight, targetWidth]
-      };
+      return combinedData;
+        
     }
 
     // Single image case
-    return {
-      'data': processedImages[0],
-      'dims': [1, 3, targetHeight, targetWidth]
-    };
-  }
+    return processedImages
+      
 }

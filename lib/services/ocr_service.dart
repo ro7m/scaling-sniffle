@@ -53,11 +53,16 @@ class OCRService {
 
       final results = <OCRResult>[];
       for (var box in boundingBoxes) {
-        final croppedImage = await _cropImage(image, box);
-        final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
-        final text = await textRecognizer!.recognizeText(preprocessedCrop);
-        if (text.isNotEmpty) {
-          results.add(OCRResult(text: text, boundingBox: box));
+        try {
+          final croppedImage = await _cropImage(image, box);
+          final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
+          final text = await textRecognizer!.recognizeText(preprocessedCrop);
+          if (text.isNotEmpty) {
+            results.add(OCRResult(text: text, boundingBox: box));
+          }
+        } catch (e) {
+          debugCallback?.call('Error processing box: $e');
+          continue;
         }
       }
 
