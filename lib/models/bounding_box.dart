@@ -16,3 +16,4 @@ class BoundingBox {
     this.coordinates,
     this.config,
   });
+}
