@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
 import 'dart:io';
-import 'package:camera/camera';
+import 'package:image_picker/image_picker.dart';
 import '../services/ocr_service.dart';
 import '../models/bounding_box.dart';
 import '../services/bounding_box_painter.dart';
@@ -37,6 +37,20 @@ class _PreviewScreenState extends State<PreviewScreen> {
     print(message);
   }
 
+  Color _parseColor(String colorStr) {
+    try {
+      if (colorStr.startsWith('#')) {
+        colorStr = colorStr.substring(1);
+      }
+      if (colorStr.length == 6) {
+        return Color(int.parse('FF$colorStr', radix: 16));
+      }
+      return Colors.red; // Default color
+    } catch (e) {
+      return Colors.red; // Default color on error
+    }
+  }
+
   Future<void> _processImage() async {
     try {
       setState(() {
@@ -69,20 +83,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
     }
   }
 
-  Color _parseColor(String colorStr) {
-    try {
-      if (colorStr.startsWith('#')) {
-        colorStr = colorStr.substring(1);
-      }
-      if (colorStr.length == 6) {
-        return Color(int.parse('FF$colorStr', radix: 16));
-      }
-      return Colors.red; // Default color
-    } catch (e) {
-      return Colors.red; // Default color on error
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -97,6 +97,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                 painter: BoundingBoxPainter(
                   image: _decodedImage!,
                   boundingBoxes: _boundingBoxes,
+                  parseColor: _parseColor, // Pass the color parser function
                 ),
                 size: Size(
                   MediaQuery.of(context).size.width,
@@ -107,7 +108,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
           else
             Center(
               child: Image.file(
-                File(widget.image.path), // Now File is properly imported
+                File(widget.image.path),
                 fit: BoxFit.contain,
               ),
             ),
@@ -115,7 +116,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
             const Center(
               child: CircularProgressIndicator(),
             ),
-          // Display extracted text
           if (_extractedText.isNotEmpty)
             Positioned(
               bottom: 20,
@@ -133,77 +133,5 @@ class _PreviewScreenState extends State<PreviewScreen> {
         ],
       ),
     );
-  }
-}
-
-class BoundingBoxPainter extends CustomPainter {
-  final ui.Image image;
-  final List<BoundingBox> boundingBoxes;
-
-  BoundingBoxPainter({
-    required this.image,
-    required this.boundingBoxes,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Draw the image
-    final imageSize = Size(image.width.toDouble(), image.height.toDouble());
-    final fitSize = _calculateFitSize(imageSize, size);
-    final rect = _centerRect(fitSize, size);
-    canvas.drawImage(image, rect.topLeft, Paint());
-
-    // Draw bounding boxes
-    for (var box in boundingBoxes) {
-      final paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0
-        ..color = _parseColor(box.config?['stroke'] ?? '#FF0000');
-
-      if (box.coordinates != null) {
-        final points = box.coordinates!.map((coord) => Offset(
-              coord[0] * rect.width + rect.left,
-              coord[1] * rect.height + rect.top,
-            )).toList();
-
-        // Draw the box
-        final path = Path();
-        path.moveTo(points[0].dx, points[0].dy);
-        for (int i = 1; i < points.length; i++) {
-          path.lineTo(points[i].dx, points[i].dy);
-        }
-        path.close();
-        canvas.drawPath(path, paint);
-      }
-    }
-  }
-
-  Rect _centerRect(Size fitSize, Size size) {
-    final left = (size.width - fitSize.width) / 2;
-    final top = (size.height - fitSize.height) / 2;
-    return Rect.fromLTWH(left, top, fitSize.width, fitSize.height);
-  }
-
-  Size _calculateFitSize(Size imageSize, Size boxSize) {
-    final imageAspectRatio = imageSize.width / imageSize.height;
-    final boxAspectRatio = boxSize.width / boxSize.height;
-
-    late double fitWidth;
-    late double fitHeight;
-
-    if (imageAspectRatio > boxAspectRatio) {
-      fitWidth = boxSize.width;
-      fitHeight = fitWidth / imageAspectRatio;
-    } else {
-      fitHeight = boxSize.height;
-      fitWidth = fitHeight * imageAspectRatio;
-    }
-
-    return Size(fitWidth, fitHeight);
-  }
-
-  @override
-  bool shouldRepaint(BoundingBoxPainter oldDelegate) {
-    return oldDelegate.image != image || oldDelegate.boundingBoxes != boundingBoxes;
   }
 }
