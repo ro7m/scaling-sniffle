@@ -23,10 +23,15 @@ class OCRService {
     textRecognizer = TextRecognizer(modelLoader.recognitionModel!);
   }
 
-  Future<List<OCRResult>> processImage(ui.Image image, {void Function(String)? debugCallback}) async {
+  Future<List<OCRResult>> processImage(XFile imageFile, {void Function(String)? debugCallback}) async {
     this.debugCallback = debugCallback;
     try {
       debugCallback?.call('Starting image processing...');
+
+      final bytes = await imageFile.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frameInfo = await codec.getNextFrame();
+      final image - frameInfo.image;
 
       final preprocessedImage = await imagePreprocessor.preprocessForDetection(image);
       debugCallback?.call('Image preprocessed for detection');
@@ -44,10 +49,10 @@ class OCRService {
       final results = <OCRResult>[];
       for (var box in boundingBoxes) {
         final croppedImage = await _cropImage(image, box);
-        final preprocessedCrop = await imagePreprocessor.preprocessForRecognition(croppedImage);
+        final preprocessedCrop = await imagePreprocessor.preprocessForRecognition([croppedImage]);
         final text = await textRecognizer!.recognizeText(preprocessedCrop);
         if (text.isNotEmpty) {
-          results.add(OCRResult(text: text, boundingBox: box));
+          results.add(OCRResult(text: text[0], boundingBox: box));
         }
       }
 
