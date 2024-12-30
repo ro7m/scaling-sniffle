@@ -16,18 +16,19 @@ class TextRecognizer {
 
     List<OrtValue>? modelResults;
     try {
-      modelResults = await recognitionModel.runAsync(runOptions, inputs);
+      final results = await recognitionModel.runAsync(runOptions, inputs);
+      modelResults = results?.whereType<OrtValue>().toList();
+      
       inputOrt.release();
       runOptions.release();
 
-      if (modelResults == null || modelResults.isEmpty || modelResults.first == null) {
+      if (modelResults == null || modelResults.isEmpty) {
         throw Exception('Recognition model output is null');
       }
 
-      final output = modelResults.first!.value as List;
+      final output = modelResults.first.value as List;
       final logits = _flattenNestedList(output);
 
-      // Get shape information from the tensor
       final height = OCRConstants.REC_TARGET_SIZE[0];
       final numClasses = OCRConstants.VOCAB.length;
 
@@ -45,8 +46,9 @@ class TextRecognizer {
         bestPath.add(maxIndex);
       }
 
-      // Clean up
-      modelResults.forEach((element) => element?.release());
+      modelResults.forEach((element) {
+        if (element != null) element.release();
+      });
 
       final StringBuffer decodedText = StringBuffer();
       int prevIndex = -1;
@@ -59,8 +61,9 @@ class TextRecognizer {
 
       return decodedText.toString();
     } catch (e) {
-      // Clean up in case of error
-      modelResults?.forEach((element) => element?.release());
+      modelResults?.forEach((element) {
+        if (element != null) element.release();
+      });
       throw Exception('Error in text recognition: $e');
     }
   }

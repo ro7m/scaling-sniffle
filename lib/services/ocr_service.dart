@@ -1,10 +1,12 @@
 import 'dart:ui' as ui;
-import 'package:image_picker/image_picker.dart'; // Add this import
+import 'dart:typed_data';
+import 'package:image_picker/image_picker.dart';
 import 'model_loader.dart';
 import 'image_preprocessor.dart';
 import 'text_detector.dart';
 import 'text_recognizer.dart';
 import '../models/ocr_result.dart';
+import '../models/bounding_box.dart';
 import 'dart:io';
 
 class OCRService {
@@ -31,7 +33,7 @@ class OCRService {
 
       // Load image from file
       final File file = File(imageFile.path);
-      final List<int> bytes = await file.readAsBytes();
+      final Uint8List bytes = await file.readAsBytes();
       final ui.Codec codec = await ui.instantiateImageCodec(bytes);
       final ui.FrameInfo frameInfo = await codec.getNextFrame();
       final ui.Image image = frameInfo.image;

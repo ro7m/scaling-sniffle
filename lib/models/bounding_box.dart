@@ -1,5 +1,5 @@
 class BoundingBox {
-  final int? id;
+  final int id;
   final double x;
   final double y;
   final double width;
@@ -8,7 +8,7 @@ class BoundingBox {
   final Map<String, dynamic>? config;
 
   BoundingBox({
-    this.id,
+    required this.id,
     required this.x,
     required this.y,
     required this.width,
