@@ -1,3 +1,7 @@
+import 'package:flutter/material.dart';
+import 'dart:ui' as ui; // Import dart:ui with an alias
+import '../models/bounding_box.dart';
+
 class BoundingBoxPainter extends CustomPainter {
   final ui.Image image;
   final List<BoundingBox> boundingBoxes;
