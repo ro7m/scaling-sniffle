@@ -1,6 +1,6 @@
 import 'dart:ui' as ui;
 import 'dart:typed_data';
-import 'dart:math'; 
+import 'dart:math' as math;
 import '../constants.dart';
 
 class ImagePreprocessor {
@@ -66,7 +66,8 @@ class ImagePreprocessor {
     return preprocessedData;
   }
 
-  Future<Map<String, dynamic>> preprocessForRecognition(List<ui.Image> crops) async {
+  // Changed method name to match what's being called
+  Future<Map<String, dynamic>> preprocessImageForRecognition(List<ui.Image> crops) async {
     const targetHeight = 32;
     const targetWidth = 128;
     const mean = [0.485, 0.456, 0.406]; // ImageNet mean
