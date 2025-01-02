@@ -27,36 +27,51 @@ class TextRecognizer {
       }
 
       final output = modelResults.first.value as List;
-      final logits = _flattenNestedList(output);
+      final List<double> logits = _flattenNestedList(output);
 
+      // Get dimensions from the flattened output
+      final batchSize = 1; // Since we process one image at a time
       final height = OCRConstants.REC_TARGET_SIZE[0];
-      final numClasses = OCRConstants.VOCAB.length;
-
-      List<double> softmax(List<double> logits) {
-        final expLogits = logits.map((x) => math.exp(x)).toList();
-        final sumExpLogits = expLogits.reduce((a, b) => a + b);
-        return expLogits.map((x) => x / sumExpLogits).toList();
-      }
-
-      final List<int> bestPath = [];
+      final numClasses = OCRConstants.VOCAB.length + 1; // +1 for blank token
+      
+      // Process logits for each timestep
+      final List<List<double>> probabilities = [];
       for (int h = 0; h < height; h++) {
-        final List<double> timestepLogits = logits.sublist(h * numClasses, (h + 1) * numClasses);
-        final softmaxed = softmax(timestepLogits);
-        final maxIndex = softmaxed.indexWhere((x) => x == softmaxed.reduce(math.max));
-        bestPath.add(maxIndex);
+        final List<double> timestepLogits = logits.sublist(
+          h * numClasses, 
+          (h + 1) * numClasses
+        );
+        probabilities.add(_softmax(timestepLogits));
       }
 
+      // Find best path using greedy decoding
+      final List<int> bestPath = [];
+      int prevClass = -1;
+      
+      for (int h = 0; h < height; h++) {
+        final List<double> probs = probabilities[h];
+        final int bestClass = _argmax(probs);
+        
+        // Apply CTC decoding rules:
+        // 1. Remove repeated tokens
+        // 2. Remove blank tokens (last class)
+        if (bestClass != numClasses - 1 && bestClass != prevClass) {
+          bestPath.add(bestClass);
+          prevClass = bestClass;
+        }
+      }
+
+      // Release memory
       modelResults.forEach((element) {
         if (element != null) element.release();
       });
 
+      // Convert indices to text
       final StringBuffer decodedText = StringBuffer();
-      int prevIndex = -1;
       for (final index in bestPath) {
-        if (index != numClasses - 1 && index != prevIndex) {
+        if (index < OCRConstants.VOCAB.length) {
           decodedText.write(OCRConstants.VOCAB[index]);
         }
-        prevIndex = index;
       }
 
       return decodedText.toString();
@@ -66,6 +81,38 @@ class TextRecognizer {
       });
       throw Exception('Error in text recognition: $e');
     }
+  }
+
+  // Helper function to compute softmax
+  List<double> _softmax(List<double> logits) {
+    // Find max for numerical stability
+    final double maxLogit = logits.reduce(math.max);
+    
+    // Compute exp of shifted logits
+    final List<double> expLogits = logits.map(
+      (x) => math.exp(x - maxLogit)
+    ).toList();
+    
+    // Compute sum for normalization
+    final double sumExp = expLogits.reduce((a, b) => a + b);
+    
+    // Normalize to get probabilities
+    return expLogits.map((x) => x / sumExp).toList();
+  }
+
+  // Helper function to find argmax
+  int _argmax(List<double> array) {
+    int maxIndex = 0;
+    double maxValue = array[0];
+    
+    for (int i = 1; i < array.length; i++) {
+      if (array[i] > maxValue) {
+        maxValue = array[i];
+        maxIndex = i;
+      }
+    }
+    
+    return maxIndex;
   }
 
   Float32List _flattenNestedList(List nestedList) {
