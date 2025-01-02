@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
+import 'dart:io'; 
 import 'package:camera/camera.dart';
 import '../services/ocr_service.dart';
 import '../models/bounding_box.dart';
@@ -90,15 +91,17 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
     for (var result in _results) {
       bool addedToExistingLine = false;
+      final int yPos = result.boundingBox.y.round(); // Convert double to int
+      
       for (var y in lineGroups.keys) {
-        if ((result.boundingBox.y - y).abs() <= lineThreshold) {
+        if ((yPos - y).abs() <= lineThreshold) {
           lineGroups[y]!.add(result);
           addedToExistingLine = true;
           break;
         }
       }
       if (!addedToExistingLine) {
-        lineGroups[result.boundingBox.y] = [result];
+        lineGroups[yPos] = [result]; // Use the rounded y position as key
       }
     }
 
