@@ -65,7 +65,7 @@ class OCRService {
 
   if (crops.isNotEmpty) {
     final preprocessed = await imagePreprocessor.preprocessImageForRecognition(crops);
-    final texts = await textRecognizer!.recognizeText(preprocessed['data'] as Float32List,crops.length);
+    final texts = await textRecognizer!.recognizeTexts(preprocessed['data'] as Float32List,crops.length);
     
     for (int i = 0; i < texts.length; i++) {
       if (texts[i].isNotEmpty) {
