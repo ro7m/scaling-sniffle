@@ -80,20 +80,47 @@ class CameraScreenState extends State<CameraScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Take a Picture')),
-      body: FutureBuilder<void>(
-        future: _initializeControllerFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done) {
-            return CameraPreview(_controller);
-          } else {
-            return const Center(child: CircularProgressIndicator());
-          }
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _takePicture,
-        child: const Icon(Icons.camera_alt),
+      // Remove the AppBar to make camera full screen
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Camera Preview that takes full screen
+          FutureBuilder<void>(
+            future: _initializeControllerFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.done) {
+                return CameraPreview(_controller);
+              } else {
+                return const Center(child: CircularProgressIndicator());
+              }
+            },
+          ),
+          // Positioned capture button at bottom center
+          Positioned(
+            bottom: 30,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                height: 80,
+                width: 80,
+                child: TextButton(
+                  onPressed: _takePicture,
+                  style: TextButton.styleFrom(
+                    shape: const CircleBorder(),
+                    backgroundColor: Colors.white.withOpacity(0.8),
+                    padding: const EdgeInsets.all(20),
+                  ),
+                  child: const Icon(
+                    Icons.camera,
+                    size: 36,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
