@@ -1,10 +1,81 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For orientation lock
+import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' show join;
 import 'package:permission_handler/permission_handler.dart';
 import 'preview_screen.dart';
+
+class CornerEdgesPainter extends CustomPainter {
+  final Color color;
+  final double edgeSize;
+  final double strokeWidth;
+
+  CornerEdgesPainter({
+    this.color = Colors.yellow,
+    this.edgeSize = 40,
+    this.strokeWidth = 4,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+
+    // Top Left Corner
+    canvas.drawLine(
+      Offset.zero,
+      Offset(edgeSize, 0),
+      paint,
+    );
+    canvas.drawLine(
+      Offset.zero,
+      Offset(0, edgeSize),
+      paint,
+    );
+
+    // Top Right Corner
+    canvas.drawLine(
+      Offset(size.width, 0),
+      Offset(size.width - edgeSize, 0),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(size.width, 0),
+      Offset(size.width, edgeSize),
+      paint,
+    );
+
+    // Bottom Left Corner
+    canvas.drawLine(
+      Offset(0, size.height),
+      Offset(edgeSize, size.height),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(0, size.height),
+      Offset(0, size.height - edgeSize),
+      paint,
+    );
+
+    // Bottom Right Corner
+    canvas.drawLine(
+      Offset(size.width, size.height),
+      Offset(size.width - edgeSize, size.height),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(size.width, size.height),
+      Offset(size.width, size.height - edgeSize),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
+}
 
 class CameraScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -26,7 +97,6 @@ class CameraScreenState extends State<CameraScreen> {
   @override
   void initState() {
     super.initState();
-    // Lock orientation to portrait
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -36,7 +106,6 @@ class CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
-    // Allow all orientations when leaving the camera screen
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -67,7 +136,6 @@ class CameraScreenState extends State<CameraScreen> {
     _initializeControllerFuture = _controller.initialize().then((_) async {
       if (!mounted) return;
       
-      // Get zoom range
       _minZoomLevel = await _controller.getMinZoomLevel();
       _maxZoomLevel = await _controller.getMaxZoomLevel();
       
@@ -112,84 +180,99 @@ class CameraScreenState extends State<CameraScreen> {
       return const Center(child: Text('Camera permission not granted'));
     }
 
+    final screenSize = MediaQuery.of(context).size;
+    final cameraHeight = screenSize.height * 0.7;
+    final cameraWidth = screenSize.width * 0.9;
+
     return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Camera Preview
-          FutureBuilder<void>(
-            future: _initializeControllerFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.done) {
-                return CameraPreview(_controller);
-              } else {
-                return const Center(child: CircularProgressIndicator());
-              }
-            },
-          ),
-
-          // Rectangular Guide Box
-          Center(
-            child: Container(
-              width: MediaQuery.of(context).size.width * 0.8,
-              height: MediaQuery.of(context).size.width * 0.3, // Aspect ratio for document
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Colors.white,
-                  width: 2.0,
-                ),
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-
-          // Zoom Controls
-          Positioned(
-            right: 16,
-            top: MediaQuery.of(context).padding.top + 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: RotatedBox(
-                quarterTurns: 3,
-                child: Slider(
-                  value: _currentZoomLevel,
-                  min: _minZoomLevel,
-                  max: _maxZoomLevel,
-                  activeColor: Colors.white,
-                  inactiveColor: Colors.white30,
-                  onChanged: (value) => _setZoomLevel(value),
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Camera Preview
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: cameraWidth,
+                height: cameraHeight,
+                child: FutureBuilder<void>(
+                  future: _initializeControllerFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.done) {
+                      return FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: cameraWidth,
+                          height: cameraHeight,
+                          child: CameraPreview(_controller),
+                        ),
+                      );
+                    } else {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                  },
                 ),
               ),
             ),
-          ),
 
-          // Zoom Level Indicator
-          Positioned(
-            right: 16,
-            top: MediaQuery.of(context).padding.top + 100,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '${_currentZoomLevel.toStringAsFixed(1)}x',
-                style: const TextStyle(color: Colors.white),
+            // Corner Edges Guide
+            SizedBox(
+              width: cameraWidth,
+              height: cameraHeight,
+              child: CustomPaint(
+                painter: CornerEdgesPainter(
+                  color: Colors.yellow,
+                  edgeSize: 40,
+                  strokeWidth: 4,
+                ),
               ),
             ),
-          ),
 
-          // Capture Button
-          Positioned(
-            bottom: 30,
-            left: 0,
-            right: 0,
-            child: Center(
+            // Zoom Controls
+            Positioned(
+              right: (screenSize.width - cameraWidth) / 2 + 16,
+              top: (screenSize.height - cameraHeight) / 2 + 16,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: RotatedBox(
+                  quarterTurns: 3,
+                  child: Slider(
+                    value: _currentZoomLevel,
+                    min: _minZoomLevel,
+                    max: _maxZoomLevel,
+                    activeColor: Colors.white,
+                    inactiveColor: Colors.white30,
+                    onChanged: (value) => _setZoomLevel(value),
+                  ),
+                ),
+              ),
+            ),
+
+            // Zoom Level Indicator
+            Positioned(
+              right: (screenSize.width - cameraWidth) / 2 + 16,
+              top: (screenSize.height - cameraHeight) / 2 + 100,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_currentZoomLevel.toStringAsFixed(1)}x',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+
+            // Capture Button
+            Positioned(
+              bottom: 30,
               child: Container(
                 height: 80,
                 width: 80,
@@ -212,14 +295,10 @@ class CameraScreenState extends State<CameraScreen> {
                 ),
               ),
             ),
-          ),
 
-          // Guide Text
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 200,
-            left: 0,
-            right: 0,
-            child: Center(
+            // Guide Text
+            Positioned(
+              top: (screenSize.height - cameraHeight) / 2 - 40,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
@@ -227,7 +306,7 @@ class CameraScreenState extends State<CameraScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Text(
-                  'Align document within the box',
+                  'Align document within the corners',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -235,8 +314,8 @@ class CameraScreenState extends State<CameraScreen> {
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
