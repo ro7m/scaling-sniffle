@@ -8,9 +8,15 @@ class TextRecognizer {
 
   TextRecognizer(this.recognitionModel);
 
-  Future<String> recognizeText(Float32List preprocessedImage) async {
-    final shape = [1, 3, OCRConstants.REC_TARGET_SIZE[0], OCRConstants.REC_TARGET_SIZE[1]];
-    final inputOrt = OrtValueTensor.createTensorWithDataList(preprocessedImage, shape);
+  Future<List<String>> recognizeTexts(Float32List preprocessedImages, int batchSize) async {
+    final shape = [
+      batchSize,  // Number of crops
+      3, 
+      OCRConstants.REC_TARGET_SIZE[0], 
+      OCRConstants.REC_TARGET_SIZE[1]
+    ];
+    
+    final inputOrt = OrtValueTensor.createTensorWithDataList(preprocessedImages, shape);
     final inputs = {'input': inputOrt};
     final runOptions = OrtRunOptions();
 
@@ -29,36 +35,48 @@ class TextRecognizer {
       final output = modelResults.first.value as List;
       final List<double> logits = _flattenNestedList(output);
 
-      // Get dimensions from the flattened output
-      final batchSize = 1; // Since we process one image at a time
       final height = OCRConstants.REC_TARGET_SIZE[0];
       final numClasses = OCRConstants.VOCAB.length + 1; // +1 for blank token
-      
-      // Process logits for each timestep
-      final List<List<double>> probabilities = [];
-      for (int h = 0; h < height; h++) {
-        final List<double> timestepLogits = logits.sublist(
-          h * numClasses, 
-          (h + 1) * numClasses
-        );
-        probabilities.add(_softmax(timestepLogits));
-      }
+      final List<String> decodedTexts = [];
 
-      // Find best path using greedy decoding
-      final List<int> bestPath = [];
-      int prevClass = -1;
-      
-      for (int h = 0; h < height; h++) {
-        final List<double> probs = probabilities[h];
-        final int bestClass = _argmax(probs);
+      // Process each image in the batch
+      for (int b = 0; b < batchSize; b++) {
+        final List<List<double>> probabilities = [];
         
-        // Apply CTC decoding rules:
-        // 1. Remove repeated tokens
-        // 2. Remove blank tokens (last class)
-        if (bestClass != numClasses - 1 && bestClass != prevClass) {
-          bestPath.add(bestClass);
-          prevClass = bestClass;
+        // Process logits for each timestep for this image
+        for (int h = 0; h < height; h++) {
+          final int baseIndex = b * height * numClasses + h * numClasses;
+          final List<double> timestepLogits = logits.sublist(
+            baseIndex, 
+            baseIndex + numClasses
+          );
+          probabilities.add(_softmax(timestepLogits));
         }
+
+        // Find best path using greedy decoding
+        final List<int> bestPath = [];
+        int prevClass = -1;
+        
+        for (int h = 0; h < height; h++) {
+          final List<double> probs = probabilities[h];
+          final int bestClass = _argmax(probs);
+          
+          // Apply CTC decoding rules
+          if (bestClass != numClasses - 1 && bestClass != prevClass) {
+            bestPath.add(bestClass);
+            prevClass = bestClass;
+          }
+        }
+
+        // Convert indices to text
+        final StringBuffer decodedText = StringBuffer();
+        for (final index in bestPath) {
+          if (index < OCRConstants.VOCAB.length) {
+            decodedText.write(OCRConstants.VOCAB[index]);
+          }
+        }
+        
+        decodedTexts.add(decodedText.toString());
       }
 
       // Release memory
@@ -66,15 +84,7 @@ class TextRecognizer {
         if (element != null) element.release();
       });
 
-      // Convert indices to text
-      final StringBuffer decodedText = StringBuffer();
-      for (final index in bestPath) {
-        if (index < OCRConstants.VOCAB.length) {
-          decodedText.write(OCRConstants.VOCAB[index]);
-        }
-      }
-
-      return decodedText.toString();
+      return decodedTexts;
     } catch (e) {
       modelResults?.forEach((element) {
         if (element != null) element.release();
