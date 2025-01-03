@@ -97,9 +97,6 @@ Widget _buildBody() {
               const SizedBox(height: 16),
             ],
             
-            if (_results.isNotEmpty) 
-              _buildStructuredText(),
-            
             const SizedBox(height: 16),
             if (_kvdbData == null) ...[
               const Center(
@@ -120,25 +117,6 @@ Widget _buildBody() {
                 child: JsonTable(
                   [_kvdbData!], // Convert Map to List by wrapping it in []
                   showColumnToggle: true,
-                  tableHeaderBuilder: (String header) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8.0, 
-                        vertical: 4.0
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade300),
-                        color: Colors.grey.shade100,
-                      ),
-                      child: Text(
-                        header.toUpperCase(),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15
-                        ),
-                      ),
-                    );
-                  },
                   tableCellBuilder: (value) {
                     return Container(
                       padding: const EdgeInsets.symmetric(
