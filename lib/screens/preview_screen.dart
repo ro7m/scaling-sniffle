@@ -9,6 +9,15 @@ import '../services/bounding_box_painter.dart';
 import '../models/ocr_result.dart';
 import '../services/kvdb_service.dart';
 
+class PreviewScreen extends StatefulWidget {
+  final XFile image;
+
+  const PreviewScreen({Key? key, required this.image}) : super(key: key);
+
+  @override
+  _PreviewScreenState createState() => _PreviewScreenState();
+}
+
 class _PreviewScreenState extends State<PreviewScreen> {
   final OCRService _ocrService = OCRService();
   final KVDBService _kvdbService = KVDBService();
@@ -95,9 +104,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
               const SizedBox(height: 16),
             ],
             
-            if (_results.isNotEmpty) 
-              _buildStructuredText(),
-            
             const SizedBox(height: 16),
             if (_kvdbData == null) ...[
               const Center(
@@ -111,15 +117,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
               ),
             ] else ...[
                JsonTable(
-                      _kvdbData,
+                      JsonEncoder.withIndent('  ').convert(_kvdbData),
                       showColumnToggle: true,
                       allowRowHighlight: true,
                       rowHighlightColor: Colors.yellow[500]!.withOpacity(0.7),
                       paginationRowCount: 5,
-                      onRowSelect: (index, map) {
-                        print(index);
-                        print(map);
-                      },
                     )
             ],
           ],
