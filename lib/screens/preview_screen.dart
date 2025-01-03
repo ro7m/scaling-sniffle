@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:json_table/json_table.dart';
+import 'package:http/http.dart' as http;
 import '../services/ocr_service.dart';
 import '../models/bounding_box.dart';
 import '../services/bounding_box_painter.dart';
@@ -42,7 +43,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
       // Write to KVDB
       final key = await _kvdbService.writeData(results).catchError((error) {
         throw Exception('Failed to save data: ${error.toString()}');
-      })
+      });
       
       setState(() {
         _results = results;
