@@ -126,8 +126,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
     );
   }
 
-  Widget _buildKVDBDataTable() {
-
+Widget _buildKVDBDataTable() {
     final processedData = _kvdbData?['Processed_data'] as List?;
     
     if (_kvdbData == null) {
@@ -148,7 +147,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
           JsonTable(
             processedData,
             showColumnToggle: true,
-            tableHeaderBuilder: (String header) {
+            tableHeaderBuilder: (String? header) {  // Changed String to String?
               return Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 8.0,
@@ -159,7 +158,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   color: Colors.grey.shade100,
                 ),
                 child: Text(
-                  header.toUpperCase(),
+                  (header ?? '').toUpperCase(),  // Add null check for header
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 15
