@@ -54,7 +54,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
       // Wait for 8 seconds before reading back from KVDB
       await Future.delayed(const Duration(seconds: 8));
       
-      // Read from KVDB for formatted
+      // Read from KVDB using the generated key
       final data = await _kvdbService.readData("1735902270721").catchError((error) {
         throw Exception('Failed to fetch data: ${error.toString()}');
       });
@@ -80,7 +80,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
     );
   }
 
-Widget _buildBody() {
+  Widget _buildBody() {
     if (_isProcessing) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -116,35 +116,80 @@ Widget _buildBody() {
               ),
             ] else ...[
               const Text('Extracted Data:', 
-              style: TextStyle(fontWeight: FontWeight.bold)),
+                style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: JsonTable(
-                  _kvdbData['Processed_data']
-                  showColumnToggle: true,
-                  tableCellBuilder: (value) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8.0, 
-                        vertical: 4.0
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: Text(
-                        value.toString(),
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    );
-                  },
-                ),
-              ),
+              _buildKVDBDataTable(),
             ],
           ],
         ),
       ),
     );
-}
+  }
 
+  Widget _buildKVDBDataTable() {
+
+    final processedData = _kvdbData?['Processed_data'] as List?;
+    
+    if (_kvdbData == null) {
+      return const Text('No data available');
+    }
+
+    if (processedData == null || processedData.isEmpty) {
+      return const Text('No processed data available');
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Key: ${_kvdbData?['Key'] ?? 'N/A'}'),
+          const SizedBox(height: 8),
+          JsonTable(
+            processedData,
+            showColumnToggle: true,
+            tableHeaderBuilder: (String header) {
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8.0,
+                  vertical: 4.0
+                ),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  color: Colors.grey.shade100,
+                ),
+                child: Text(
+                  header.toUpperCase(),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15
+                  ),
+                ),
+              );
+            },
+            tableCellBuilder: (value) {
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8.0,
+                  vertical: 4.0
+                ),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Text(
+                  value?.toString() ?? 'N/A',
+                  style: const TextStyle(fontSize: 14),
+                ),
+              );
+            },
+          ),
+          if (_kvdbData?['Error'] != null) ...[
+            const SizedBox(height: 8),
+            Text('Error: ${_kvdbData?['Error']}',
+                style: const TextStyle(color: Colors.red)),
+          ],
+        ],
+      ),
+    );
+  }
 }
