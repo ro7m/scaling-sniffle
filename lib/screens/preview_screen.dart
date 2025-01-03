@@ -116,12 +116,12 @@ Widget _buildBody() {
               ),
             ] else ...[
               const Text('Extracted Data:', 
-                style: TextStyle(fontWeight: FontWeight.bold)),
+              style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: JsonTable(
-                  _kvdbData?['Processed_data'] as List?
+                  _kvdbData['Processed_data']
                   showColumnToggle: true,
                   tableCellBuilder: (value) {
                     return Container(
