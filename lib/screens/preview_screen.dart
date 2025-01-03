@@ -35,7 +35,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _processImage();
   }
 
-   Future<void> _processImage() async {
+  Future<void> _processImage() async {
     try {
       await _ocrService.loadModels();
       final results = await _ocrService.processImage(widget.image);
@@ -59,10 +59,13 @@ class _PreviewScreenState extends State<PreviewScreen> {
         throw Exception('Failed to fetch data: ${error.toString()}');
       });
 
+      print('KVDB Data received: ${jsonEncode(data)}'); // Debug print
+
       setState(() {
         _kvdbData = data;
       });
     } catch (e) {
+      print('Error in _processImage: $e'); // Debug print
       setState(() {
         _errorMessage = 'Error: ${e.toString()}';
         _isProcessing = false;
@@ -97,28 +100,64 @@ class _PreviewScreenState extends State<PreviewScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (_kvdbKey != null) ...[
-              Text('KVDB Key: $_kvdbKey', 
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-            ],
+            // Debug Information Section
+            Container(
+              padding: const EdgeInsets.all(8.0),
+              color: Colors.grey[200],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('DEBUG INFORMATION',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red
+                    )
+                  ),
+                  const SizedBox(height: 8),
+                  Text('KVDB Data: ${_kvdbData.toString()}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'Courier',
+                    )
+                  ),
+                  const SizedBox(height: 8),
+                  Text('KVDB Data Type: ${_kvdbData?.runtimeType}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'Courier',
+                    )
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Original Results Section
+            const Text('Original Results:', 
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(height: 8),
+            ..._results.map((result) => Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Text(result.text),
+            )).toList(),
             
-            const SizedBox(height: 16),
-            if (_kvdbData == null) ...[
+            const SizedBox(height: 24),
+            
+            if (_kvdbData != null) ...[
+              const Text('KVDB Data:', 
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 8),
+              _buildKVDBDataTable(),
+            ] else ...[
               const Center(
                 child: Column(
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 8),
-                    Text('Crunching the data...'),
+                    Text('Loading KVDB data...'),
                   ],
                 ),
               ),
-            ] else ...[
-              const Text('Extracted Data:', 
-                style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              _buildKVDBDataTable(),
             ],
           ],
         ),
@@ -126,52 +165,40 @@ class _PreviewScreenState extends State<PreviewScreen> {
     );
   }
 
-Widget _buildKVDBDataTable() {
-    final processedData = _kvdbData?['Processed_data'] as List?;
-    
+  Widget _buildKVDBDataTable() {
     if (_kvdbData == null) {
       return const Text('No data available');
     }
 
-    if (processedData == null || processedData.isEmpty) {
-      return const Text('No processed data available');
-    }
+    // Convert the data to a format that JsonTable can understand
+    final List<Map<String, dynamic>> tableData = [_kvdbData!];
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Key: ${_kvdbData?['Key'] ?? 'N/A'}'),
-          const SizedBox(height: 8),
           JsonTable(
-            processedData,
+            tableData,
             showColumnToggle: true,
-            tableHeaderBuilder: (String? header) {  // Changed String to String?
+            allowRowHighlight: true,
+            rowHighlightColor: Colors.yellow[500]!.withOpacity(0.7),
+            tableHeaderBuilder: (String? header) {
               return Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8.0,
-                  vertical: 4.0
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade300),
                   color: Colors.grey.shade100,
                 ),
                 child: Text(
-                  (header ?? '').toUpperCase(),  // Add null check for header
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15
-                  ),
+                  (header ?? '').toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                 ),
               );
             },
             tableCellBuilder: (value) {
               return Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8.0,
-                  vertical: 4.0
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade300),
                 ),
@@ -182,11 +209,6 @@ Widget _buildKVDBDataTable() {
               );
             },
           ),
-          if (_kvdbData?['Error'] != null) ...[
-            const SizedBox(height: 8),
-            Text('Error: ${_kvdbData?['Error']}',
-                style: const TextStyle(color: Colors.red)),
-          ],
         ],
       ),
     );
