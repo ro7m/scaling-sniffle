@@ -41,6 +41,9 @@ dependencies:
   onnxruntime: ^1.4.1
   image: ^4.5.2
   dartcv4: ^1.0.1
+  json_table: ^2.0.1
+  http: ^1.2.2
+  device_info_plus: ^11.2.0
 
 
 dev_dependencies:
