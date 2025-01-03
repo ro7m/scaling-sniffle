@@ -25,27 +25,49 @@ class KVDBService {
       'deviceInfo': deviceInfo,
     };
 
-    final response = await http.put(
-      Uri.parse('$writeUrl/$timestamp'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
+    try {
+      final response = await http.put(
+        Uri.parse('$writeUrl/$timestamp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      );
 
-    if (response.statusCode != 200) {
-      throw Exception('Failed to write to KVDB: ${response.statusCode}');
+      if (response.statusCode != 200) {
+        throw HttpException('Failed to write to KVDB: ${response.statusCode}');
+      }
+
+      return timestamp.toString();
+    } on SocketException catch (e) {
+      throw Exception(
+        'Network error: Please check your internet connection. (${e.message})'
+      );
+    } on HttpException catch (e) {
+      throw Exception('HTTP error: ${e.message}');
+    } catch (e) {
+      throw Exception('Unexpected error: ${e.toString()}');
     }
-
-    return timestamp.toString();
   }
 
   Future<Map<String, dynamic>> readData(String key) async {
-    final response = await http.get(Uri.parse('$readUrl/$key'));
-    
-    if (response.statusCode != 200) {
-      throw Exception('Failed to read from KVDB: ${response.statusCode}');
-    }
+    try {
+      final response = await http.get(Uri.parse('$readUrl/$key'));
+      
+      if (response.statusCode != 200) {
+        throw HttpException('Failed to read from KVDB: ${response.statusCode}');
+      }
 
-    return jsonDecode(response.body);
+      return jsonDecode(response.body);
+    } on SocketException catch (e) {
+      throw Exception(
+        'Network error: Please check your internet connection. (${e.message})'
+      );
+    } on HttpException catch (e) {
+      throw Exception('HTTP error: ${e.message}');
+    } on FormatException catch (e) {
+      throw Exception('Data format error: ${e.message}');
+    } catch (e) {
+      throw Exception('Unexpected error: ${e.toString()}');
+    }
   }
 
   Future<Map<String, dynamic>> _getDeviceInfo() async {

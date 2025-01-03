@@ -40,7 +40,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
       final results = await _ocrService.processImage(widget.image);
       
       // Write to KVDB
-      final key = await _kvdbService.writeData(results);
+      final key = await _kvdbService.writeData(results).catchError((error) {
+        throw Exception('Failed to save data: ${error.toString()}');
+      })
       
       setState(() {
         _results = results;
@@ -51,8 +53,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
       // Wait for 8 seconds before reading back from KVDB
       await Future.delayed(const Duration(seconds: 8));
       
-      // Read back from KVDB to verify
-      final data = await _kvdbService.readData("1735902270721");
+      // Read from KVDB for formatted
+      final data = await _kvdbService.readData("1735902270721").catchError((error) {
+        throw Exception('Failed to fetch data: ${error.toString()}');
+      });
+
       setState(() {
         _kvdbData = data;
       });
