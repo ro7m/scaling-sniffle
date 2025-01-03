@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:json_table/json_table.dart';
 import '../services/ocr_service.dart';
 import '../models/ocr_result.dart';
 import '../services/kvdb_service.dart';
@@ -20,7 +19,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   final KVDBService _kvdbService = KVDBService();
   bool _isProcessing = true;
   String _errorMessage = '';
-  List<Map<String, dynamic>>? _processedData;
+  Map<String, dynamic>? _responseData;
 
   @override
   void initState() {
@@ -40,15 +39,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
       // Wait for processing
       await Future.delayed(const Duration(seconds: 8));
       
-      // Read from KVDB
+      // Read from KVDB - using the generated key instead of hardcoded value
       final data = await _kvdbService.readData("1735902270721");
       
-      // Extract and cast Processed_data
-      final processedData = (data['Processed_data'] as List?)
-          ?.cast<Map<String, dynamic>>() ?? [];
-
       setState(() {
-        _processedData = processedData;
+        _responseData = data;
         _isProcessing = false;
       });
     } catch (e) {
@@ -80,19 +75,72 @@ class _PreviewScreenState extends State<PreviewScreen> {
       );
     }
 
-    if (_processedData == null || _processedData!.isEmpty) {
-      return const Center(child: Text('No processed data available'));
+    if (_responseData == null) {
+      return const Center(child: Text('No data available'));
     }
 
     return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: JsonTable(
-          _processedData!,
-          showColumnToggle: true,
-        ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              'Response Data',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: _buildDataTable(),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildDataTable() {
+    List<DataRow> rows = [];
+    
+    void addDataRows(Map<String, dynamic> map, [String prefix = '']) {
+      map.forEach((key, value) {
+        if (value is Map<String, dynamic>) {
+          rows.add(DataRow(cells: [
+            DataCell(Text('$prefix$key')),
+            DataCell(Text('Object')),
+          ]));
+          addDataRows(value, '$prefix  ');
+        } else if (value is List) {
+          rows.add(DataRow(cells: [
+            DataCell(Text('$prefix$key')),
+            DataCell(Text('List [${value.length} items]')),
+          ]));
+          for (var i = 0; i < value.length; i++) {
+            if (value[i] is Map) {
+              addDataRows(value[i] as Map<String, dynamic>, '$prefix  [$i] ');
+            } else {
+              rows.add(DataRow(cells: [
+                DataCell(Text('$prefix  [$i]')),
+                DataCell(Text(value[i].toString())),
+              ]));
+            }
+          }
+        } else {
+          rows.add(DataRow(cells: [
+            DataCell(Text('$prefix$key')),
+            DataCell(Text(value?.toString() ?? 'null')),
+          ]));
+        }
+      });
+    }
+
+    addDataRows(_responseData!);
+
+    return DataTable(
+      columns: const [
+        DataColumn(label: Text('Field')),
+        DataColumn(label: Text('Value')),
+      ],
+      rows: rows,
     );
   }
 }
