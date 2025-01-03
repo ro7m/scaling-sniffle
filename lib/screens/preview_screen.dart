@@ -110,7 +110,7 @@ Widget _buildBody() {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 8),
-                    Text('Waiting to fetch stored data...'),
+                    Text('Crunching the data...'),
                   ],
                 ),
               ),
@@ -121,7 +121,7 @@ Widget _buildBody() {
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: JsonTable(
-                  [_kvdbData!], // Convert Map to List by wrapping it in []
+                  _kvdbData?['Processed_data'] as List?
                   showColumnToggle: true,
                   tableCellBuilder: (value) {
                     return Container(
