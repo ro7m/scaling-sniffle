@@ -74,17 +74,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
     );
   }
 
-  Widget _buildBody() {
+Widget _buildBody() {
     if (_isProcessing) {
-      return const Center(
-                child: Column(
-                  children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 8),
-                    Text('Extracting data...'),
-                  ],
-                ),
-              );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_errorMessage.isNotEmpty) {
@@ -105,6 +97,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
               const SizedBox(height: 16),
             ],
             
+            if (_results.isNotEmpty) 
+              _buildStructuredText(),
+            
             const SizedBox(height: 16),
             if (_kvdbData == null) ...[
               const Center(
@@ -112,23 +107,60 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 8),
-                    Text('Crunching the data now...'),
+                    Text('Waiting to fetch stored data...'),
                   ],
                 ),
               ),
             ] else ...[
-               JsonTable(
-                      JsonEncoder.withIndent('  ').convert(_kvdbData),
-                      showColumnToggle: true,
-                      allowRowHighlight: true,
-                      rowHighlightColor: Colors.yellow[500]!.withOpacity(0.7),
-                      paginationRowCount: 5,
-                    )
+              const Text('Extracted Data:', 
+                style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: JsonTable(
+                  [_kvdbData!], // Convert Map to List by wrapping it in []
+                  showColumnToggle: true,
+                  tableHeaderBuilder: (String header) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8.0, 
+                        vertical: 4.0
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        color: Colors.grey.shade100,
+                      ),
+                      child: Text(
+                        header.toUpperCase(),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15
+                        ),
+                      ),
+                    );
+                  },
+                  tableCellBuilder: (value) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8.0, 
+                        vertical: 4.0
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        value.toString(),
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ],
           ],
         ),
       ),
     );
-  }
+}
 
 }
