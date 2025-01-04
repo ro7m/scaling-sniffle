@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import '../services/ocr_service.dart';
@@ -19,7 +18,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   final KVDBService _kvdbService = KVDBService();
   bool _isProcessing = true;
   String _errorMessage = '';
-  Map<String, dynamic>? _responseData;
+  List<Map<String, dynamic>>? _processedData;
 
   @override
   void initState() {
@@ -39,11 +38,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
       // Wait for processing
       await Future.delayed(const Duration(seconds: 8));
       
-      // Read from KVDB - using the generated key instead of hardcoded value
+      // Read from KVDB
       final data = await _kvdbService.readData("1735902270721");
       
+      // Extract only the Processed_data
+      final processedData = (data['Processed_data'] as List?)
+          ?.cast<Map<String, dynamic>>() ?? [];
+
       setState(() {
-        _responseData = data;
+        _processedData = processedData;
         _isProcessing = false;
       });
     } catch (e) {
@@ -58,7 +61,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Processed Data'),
+        title: const Text('Extracted Data'),
       ),
       body: _buildBody(),
     );
@@ -75,72 +78,41 @@ class _PreviewScreenState extends State<PreviewScreen> {
       );
     }
 
-    if (_responseData == null) {
-      return const Center(child: Text('No data available'));
+    if (_processedData == null || _processedData!.isEmpty) {
+      return const Center(child: Text('No processed data available'));
     }
 
     return SingleChildScrollView(
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'Response Data',
-              style: Theme.of(context).textTheme.headlineSmall,
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: DataTable(
+            headingTextStyle: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.blue,
             ),
+            columns: const [
+              DataColumn(label: Text('Country')),
+              DataColumn(label: Text('Exchange Rate')),
+              DataColumn(label: Text('Service')),
+              DataColumn(label: Text('Currency')),
+              DataColumn(label: Text('Product')),
+              DataColumn(label: Text('Price Range')),
+            ],
+            rows: _processedData!.map((data) => DataRow(
+              cells: [
+                DataCell(Text(data['Country'] ?? 'N/A')),
+                DataCell(Text(data['Exchange Rate']?.toString() ?? 'N/A')),
+                DataCell(Text(data['Service'] ?? 'N/A')),
+                DataCell(Text(data['Currency'] ?? 'N/A')),
+                DataCell(Text(data['Product'] ?? 'N/A')),
+                DataCell(Text(data['PriceRange'] ?? 'N/A')),
+              ],
+            )).toList(),
           ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: _buildDataTable(),
-          ),
-        ],
+        ),
       ),
-    );
-  }
-
-  Widget _buildDataTable() {
-    List<DataRow> rows = [];
-    
-    void addDataRows(Map<String, dynamic> map, [String prefix = '']) {
-      map.forEach((key, value) {
-        if (value is Map<String, dynamic>) {
-          rows.add(DataRow(cells: [
-            DataCell(Text('$prefix$key')),
-            DataCell(Text('Object')),
-          ]));
-          addDataRows(value, '$prefix  ');
-        } else if (value is List) {
-          rows.add(DataRow(cells: [
-            DataCell(Text('$prefix$key')),
-            DataCell(Text('List [${value.length} items]')),
-          ]));
-          for (var i = 0; i < value.length; i++) {
-            if (value[i] is Map) {
-              addDataRows(value[i] as Map<String, dynamic>, '$prefix  [$i] ');
-            } else {
-              rows.add(DataRow(cells: [
-                DataCell(Text('$prefix  [$i]')),
-                DataCell(Text(value[i].toString())),
-              ]));
-            }
-          }
-        } else {
-          rows.add(DataRow(cells: [
-            DataCell(Text('$prefix$key')),
-            DataCell(Text(value?.toString() ?? 'null')),
-          ]));
-        }
-      });
-    }
-
-    addDataRows(_responseData!);
-
-    return DataTable(
-      columns: const [
-        DataColumn(label: Text('Field')),
-        DataColumn(label: Text('Value')),
-      ],
-      rows: rows,
     );
   }
 }
