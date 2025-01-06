@@ -36,7 +36,7 @@ class KVDBService {
         throw HttpException('Failed to write to KVDB: ${response.statusCode}');
       }
 
-      return timestamp.toString();
+      return timestamp;
     } on SocketException catch (e) {
       throw Exception(
         'Network error: Please check your internet connection. (${e.message})'
