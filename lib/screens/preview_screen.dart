@@ -81,6 +81,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   Widget _buildBody() {
 
+    if (_isProcessing){
     if (_writtenToBucket) {
       return const Center( child: Column ( mainAxisAlignment: MainAxisAlignment.center, 
       children: [const CircularProgressIndicator(),
@@ -99,6 +100,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                 ],
       ), 
       );
+    }
     }
 
     if (_errorMessage.isNotEmpty) {
