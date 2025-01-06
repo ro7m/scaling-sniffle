@@ -36,10 +36,10 @@ class _PreviewScreenState extends State<PreviewScreen> {
       final key = await _kvdbService.writeData(results);
       
       // Wait for processing
-      await Future.delayed(const Duration(seconds: 8));
+      await Future.delayed(const Duration(seconds: 7));
       
       // Read from KVDB
-      final data = await _kvdbService.readData("1735902270721");
+      final data = await _kvdbService.readData(key);
       
       // Extract only the Processed_data
       final processedData = (data['Processed_data'] as List?)
