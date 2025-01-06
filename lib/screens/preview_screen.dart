@@ -47,7 +47,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
       });
       
       // Wait for processing
-      await Future.delayed(const Duration(seconds: 7));
+      await Future.delayed(const Duration(seconds: 25));
       
       // Read from KVDB
       final data = await _kvdbService.readData(key);
