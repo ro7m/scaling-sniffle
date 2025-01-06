@@ -30,10 +30,19 @@ class _PreviewScreenState extends State<PreviewScreen> {
     try {
       // Process image and get OCR results
       await _ocrService.loadModels();
+      
+      setState(() {
+        _writtenToBucket = false;
+      });
+      
       final results = await _ocrService.processImage(widget.image);
       
       // Write to KVDB
       final key = await _kvdbService.writeData(results);
+
+      setState(() {
+        _writtenToBucket = true;
+      });
       
       // Wait for processing
       await Future.delayed(const Duration(seconds: 7));
@@ -53,6 +62,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
       setState(() {
         _errorMessage = e.toString();
         _isProcessing = false;
+        _writtenToBucket = false;
       });
     }
   }
@@ -68,8 +78,25 @@ class _PreviewScreenState extends State<PreviewScreen> {
   }
 
   Widget _buildBody() {
-    if (_isProcessing) {
-      return const Center(child: CircularProgressIndicator());
+
+    if (_writtenToBucket) {
+      return const Center( child: Column ( mainAxisAlignment: MainAxisAlignment.center, 
+      children: [const CircularProgressIndicator(),
+                 const SizedBox(height: 20 ),
+                 const Text('Crunching data now....')
+                ],
+      ), 
+      );
+    }
+
+    else {
+      return const Center( child: Column ( mainAxisAlignment: MainAxisAlignment.center, 
+      children: [const CircularProgressIndicator(),
+                 const SizedBox(height: 20 ),
+                 const Text('Running extraction process ....')
+                ],
+      ), 
+      );
     }
 
     if (_errorMessage.isNotEmpty) {
