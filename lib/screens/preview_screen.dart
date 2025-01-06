@@ -17,6 +17,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
   final OCRService _ocrService = OCRService();
   final KVDBService _kvdbService = KVDBService();
   bool _isProcessing = true;
+  bool _writtenToBucket = false;
+
   String _errorMessage = '';
   List<Map<String, dynamic>>? _processedData;
 
