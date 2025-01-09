@@ -90,9 +90,9 @@ jobs:
           pod install
       - name: Build iOS
         run: |
-          flutter build ios --release --no-codesign
-      - name: Upload IPA
+          flutter build ios --simulator --debug
+      - name: Upload simulator build
         uses: actions/upload-artifact@v3
         with:
-          name: release-ipa
-          path: build/ios/iphoneos/Runner.app
+          name: iphone-simulator-build
+          path: build/ios/iphonesimulator/Runner.app
