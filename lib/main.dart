@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'screens/camera_screen.dart';
@@ -6,32 +7,29 @@ import 'package:flutter/services.dart';
 import 'dart:io';
 import 'dart:convert';
 
-bool isSimulator() {
-  if (!Platform.isIOS) return false;
-  return !Platform.isPhysicalDevice;
-}
-
 Future<void> main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
     
-    // Check if running on simulator
-    final bool isSimulatorDevice = isSimulator();
-    
-    if (isSimulatorDevice) {
-      // For simulator, create a mock camera list with one camera
-      final mockCamera = CameraDescription(
-        name: 'Mock Camera',
-        lensDirection: CameraLensDirection.back,
-        sensorOrientation: 0,
-      );
-      runApp(MyApp(cameras: [mockCamera]));
+    // Check if in debug mode (simulator/development)
+    if (kDebugMode) {
+      try {
+        final cameras = await availableCameras();
+        runApp(MyApp(cameras: cameras));
+      } catch (e) {
+        // If cameras aren't available (like in simulator), use mock camera
+        final mockCamera = CameraDescription(
+          name: 'Mock Camera',
+          lensDirection: CameraLensDirection.back,
+          sensorOrientation: 0,
+        );
+        runApp(MyApp(cameras: [mockCamera]));
+      }
       return;
     }
 
-    // For real devices, get actual cameras
+    // Production mode - normal camera initialization
     final cameras = await availableCameras();
-
     if (cameras.isEmpty) {
       print('No cameras found');
       runApp(const MyAppError(error: 'No cameras available'));
