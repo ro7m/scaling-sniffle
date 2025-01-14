@@ -95,7 +95,7 @@ class CameraScreenState extends State<CameraScreen> {
   double _minZoomLevel = 1.0;
   double _maxZoomLevel = 1.0;
   double _currentZoomLevel = 1.0;
-  bool _isSimulator = false;
+  bool get _isSimulator => kDebugMode && Platform.isIOS;
 
   @override
   void initState() {
@@ -108,26 +108,12 @@ class CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _checkSimulator() async {
-    if (Platform.isIOS) {
-      _isSimulator = !await _isRealDevice();
-    }
-    
     if (_isSimulator) {
       setState(() {
         _isCameraPermissionGranted = true;
       });
     } else {
       await _requestCameraPermission();
-    }
-  }
-
-  Future<bool> _isRealDevice() async {
-    try {
-      final String result = await const MethodChannel('flutter_device_type')
-          .invokeMethod('isRealDevice');
-      return result == "true";
-    } on PlatformException catch (_) {
-      return false;
     }
   }
 
@@ -251,7 +237,7 @@ class CameraScreenState extends State<CameraScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_isCameraPermissionGranted && !_isSimulator) {
-      return const Center(child: Text('Camera permission not granted'));
+      return const Center(child: Text('No Camera permission'));
     }
 
     final screenSize = MediaQuery.of(context).size;
