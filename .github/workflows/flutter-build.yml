@@ -90,9 +90,12 @@ jobs:
           pod install
       - name: Build iOS for devices
         run: |
-          flutter build ios --simulator --debug
+          flutter clean
+          flutter build ios --debug --simulator
+          cd build/ios/iphonesimulator
+          zip -r simulator-build.zip Runner.app/
       - name: Upload simulator build
         uses: actions/upload-artifact@v3
         with:
           name: iphone-simulator-build
-          path: build/ios/iphonesimulator/Runner.app
+          path: build/ios/iphonesimulator/simulator-build.zip
