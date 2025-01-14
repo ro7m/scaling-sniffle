@@ -90,13 +90,9 @@ jobs:
           pod install
       - name: Build iOS for devices
         run: |
-          flutter build ios --release --no-codesign
-          cd build/ios/iphoneos
-          mkdir Payload
-          cp -r Runner.app Payload
-          zip -r app.ipa Payload
-      - name: Upload IPA
+          flutter build ios --simulator --debug
+      - name: Upload simulator build
         uses: actions/upload-artifact@v3
         with:
-          name: iphonedevice-ipa
-          path: build/ios/iphoneos/app.ipa
+          name: iphone-simulator-build
+          path: build/ios/iphonesimulator/Runner.app
