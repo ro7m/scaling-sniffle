@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' show join;
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:io';
 import 'preview_screen.dart';
 
 class CornerEdgesPainter extends CustomPainter {
@@ -87,12 +89,13 @@ class CameraScreen extends StatefulWidget {
 }
 
 class CameraScreenState extends State<CameraScreen> {
-  late CameraController _controller;
+  late CameraController? _controller;
   late Future<void> _initializeControllerFuture;
   bool _isCameraPermissionGranted = false;
   double _minZoomLevel = 1.0;
   double _maxZoomLevel = 1.0;
   double _currentZoomLevel = 1.0;
+  bool _isSimulator = false;
 
   @override
   void initState() {
@@ -101,7 +104,31 @@ class CameraScreenState extends State<CameraScreen> {
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-    _requestCameraPermission();
+    _checkSimulator();
+  }
+
+  Future<void> _checkSimulator() async {
+    if (Platform.isIOS) {
+      _isSimulator = !await _isRealDevice();
+    }
+    
+    if (_isSimulator) {
+      setState(() {
+        _isCameraPermissionGranted = true;
+      });
+    } else {
+      await _requestCameraPermission();
+    }
+  }
+
+  Future<bool> _isRealDevice() async {
+    try {
+      final String result = await const MethodChannel('flutter_device_type')
+          .invokeMethod('isRealDevice');
+      return result == "true";
+    } on PlatformException catch (_) {
+      return false;
+    }
   }
 
   @override
@@ -112,7 +139,7 @@ class CameraScreenState extends State<CameraScreen> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -127,31 +154,56 @@ class CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _initializeCamera() async {
+    if (_isSimulator) return;
+
     _controller = CameraController(
       widget.cameras[0],
       ResolutionPreset.high,
       enableAudio: false,
     );
     
-    _initializeControllerFuture = _controller.initialize().then((_) async {
+    _initializeControllerFuture = _controller!.initialize().then((_) async {
       if (!mounted) return;
       
-      _minZoomLevel = await _controller.getMinZoomLevel();
-      _maxZoomLevel = await _controller.getMaxZoomLevel();
+      _minZoomLevel = await _controller!.getMinZoomLevel();
+      _maxZoomLevel = await _controller!.getMaxZoomLevel();
       
       setState(() {});
     });
   }
 
+  Future<XFile> _getSimulatorImage() async {
+    // Copy asset image to temporary directory
+    final ByteData data = await rootBundle.load('assets/images/sample_document.png');
+    final String path = join(
+      (await getTemporaryDirectory()).path,
+      'sample_document.png',
+    );
+    
+    final File file = File(path);
+    await file.writeAsBytes(data.buffer.asUint8List());
+    
+    return XFile(path);
+  }
+
   Future<void> _takePicture() async {
     try {
+      if (_isSimulator) {
+        final XFile mockImage = await _getSimulatorImage();
+        if (!mounted) return;
+
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => PreviewScreen(
+              image: mockImage,
+            ),
+          ),
+        );
+        return;
+      }
+
       await _initializeControllerFuture;
-      final path = join(
-        (await getTemporaryDirectory()).path,
-        '${DateTime.now()}.png',
-      );
-      
-      final image = await _controller.takePicture();
+      final image = await _controller!.takePicture();
       
       if (!mounted) return;
 
@@ -168,15 +220,37 @@ class CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _setZoomLevel(double value) async {
+    if (_isSimulator) return;
+    
     setState(() {
       _currentZoomLevel = value;
     });
-    await _controller.setZoomLevel(value);
+    await _controller?.setZoomLevel(value);
+  }
+
+  Widget _buildCameraPreview() {
+    if (_isSimulator) {
+      return Image.asset(
+        'assets/images/sample_document.png',
+        fit: BoxFit.cover,
+      );
+    }
+
+    return FutureBuilder<void>(
+      future: _initializeControllerFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.done) {
+          return CameraPreview(_controller!);
+        } else {
+          return const Center(child: CircularProgressIndicator());
+        }
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_isCameraPermissionGranted) {
+    if (!_isCameraPermissionGranted && !_isSimulator) {
       return const Center(child: Text('Camera permission not granted'));
     }
 
@@ -190,32 +264,22 @@ class CameraScreenState extends State<CameraScreen> {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // Camera Preview
+            // Camera Preview or Simulator Image
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SizedBox(
                 width: cameraWidth,
                 height: cameraHeight,
-                child: FutureBuilder<void>(
-                  future: _initializeControllerFuture,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.done) {
-                      return FittedBox(
-                        fit: BoxFit.cover,
-                        child: SizedBox(
-                          width: cameraWidth,
-                          height: cameraHeight,
-                          child: CameraPreview(_controller),
-                        ),
-                      );
-                    } else {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                  },
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: cameraWidth,
+                    height: cameraHeight,
+                    child: _buildCameraPreview(),
+                  ),
                 ),
               ),
             ),
-
             // Corner Edges Guide
             SizedBox(
               width: cameraWidth,
@@ -223,8 +287,8 @@ class CameraScreenState extends State<CameraScreen> {
               child: CustomPaint(
                 painter: CornerEdgesPainter(
                   color: Colors.yellow,
-                  edgeSize: 40,
-                  strokeWidth: 4,
+                  edgeSize: 20,
+                  strokeWidth: 2,
                 ),
               ),
             ),
@@ -236,7 +300,7 @@ class CameraScreenState extends State<CameraScreen> {
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: RotatedBox(
@@ -261,7 +325,7 @@ class CameraScreenState extends State<CameraScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   '${_currentZoomLevel.toStringAsFixed(1)}x',
@@ -309,7 +373,7 @@ class CameraScreenState extends State<CameraScreen> {
                   'Align document within the corners',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
+                    fontSize: 10,
                   ),
                 ),
               ),

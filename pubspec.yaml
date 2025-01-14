@@ -72,6 +72,7 @@ flutter:
   assets:
     - assets/models/rep_fast_base.onnx
     - assets/models/crnn_mobilenet_v3_large.onnx
+    - assets/images/sample_document.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

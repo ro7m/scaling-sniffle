@@ -2,15 +2,41 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'screens/camera_screen.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:convert';
 import 'dart:io';
+import 'dart:convert';
 
+Future<bool> isSimulator() async {
+  if (!Platform.isIOS) return false;
+  
+  try {
+    final String result = await const MethodChannel('flutter_device_type')
+        .invokeMethod('isRealDevice');
+    return result != "true";
+  } on PlatformException catch (_) {
+    return false;
+  }
+}
 
 Future<void> main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
+    
+    // Check if running on simulator
+    final bool isSimulatorDevice = await isSimulator();
+    
+    if (isSimulatorDevice) {
+      // For simulator, create a mock camera list with one camera
+      final mockCamera = CameraDescription(
+        name: 'Mock Camera',
+        lensDirection: CameraLensDirection.back,
+        sensorOrientation: 0,
+      );
+      runApp(MyApp(cameras: [mockCamera]));
+      return;
+    }
+
+    // For real devices, get actual cameras
     final cameras = await availableCameras();
 
     if (cameras.isEmpty) {
@@ -25,7 +51,6 @@ Future<void> main() async {
   }
 }
 
-
 class MyApp extends StatelessWidget {
   final List<CameraDescription> cameras;
   
@@ -34,7 +59,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter OCR App',
+      title: 'WUAI OCR App',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
