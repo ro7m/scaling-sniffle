@@ -6,16 +6,9 @@ import 'package:flutter/services.dart';
 import 'dart:io';
 import 'dart:convert';
 
-Future<bool> isSimulator() async {
+bool isSimulator() {
   if (!Platform.isIOS) return false;
-  
-  try {
-    final String result = await const MethodChannel('flutter_device_type')
-        .invokeMethod('isRealDevice');
-    return result != "true";
-  } on PlatformException catch (_) {
-    return false;
-  }
+  return !Platform.isPhysicalDevice;
 }
 
 Future<void> main() async {
@@ -23,7 +16,7 @@ Future<void> main() async {
     WidgetsFlutterBinding.ensureInitialized();
     
     // Check if running on simulator
-    final bool isSimulatorDevice = await isSimulator();
+    final bool isSimulatorDevice = isSimulator();
     
     if (isSimulatorDevice) {
       // For simulator, create a mock camera list with one camera
