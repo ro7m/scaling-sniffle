@@ -243,8 +243,20 @@ class CameraScreenState extends State<CameraScreen> {
     final screenSize = MediaQuery.of(context).size;
     final cameraHeight = screenSize.height * 0.7;
     final cameraWidth = screenSize.width * 0.9;
+    final String userId = ModalRoute.of(context)?.settings.arguments as String;
 
     return Scaffold(
+      appBar: AppBar(
+        title: Text('Camera Screen'),
+        leading: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.person),
+            SizedBox(width: 8),
+            Text(userId),
+          ],
+        ),
+      ),
       backgroundColor: Colors.black,
       body: Center(
         child: Stack(

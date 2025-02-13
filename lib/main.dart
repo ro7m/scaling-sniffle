@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'screens/camera_screen.dart';
+import 'screens/login_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
@@ -10,7 +11,7 @@ import 'dart:convert';
 Future<void> main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
-    
+
     // Check if in debug mode (simulator/development)
     if (kDebugMode) {
       try {
@@ -44,7 +45,7 @@ Future<void> main() async {
 
 class MyApp extends StatelessWidget {
   final List<CameraDescription> cameras;
-  
+
   const MyApp({Key? key, required this.cameras}) : super(key: key);
 
   @override
@@ -54,7 +55,10 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: CameraScreen(cameras: cameras),
+      routes: {
+        '/': (context) => LoginScreen(),
+        '/home': (context) => CameraScreen(cameras: cameras),
+      },
     );
   }
 }
