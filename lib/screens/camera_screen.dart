@@ -5,7 +5,10 @@ import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' show join;
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
+
 import 'preview_screen.dart';
 
 class CornerEdgesPainter extends CustomPainter {
@@ -97,6 +100,18 @@ class CameraScreenState extends State<CameraScreen> {
   double _currentZoomLevel = 1.0;
   bool get _isSimulator => kDebugMode && Platform.isIOS;
 
+  final List<String> _competitors = ['cp1', 'cp2', 'cp3', 'cp4', 'cp5'];
+  final List<String> _countries = ['ES', 'FR', 'DE', 'IT', 'NL'];
+  final Map<String, String> _countryCurrency = {
+    'ES': 'EUR',
+    'FR': 'EUR',
+    'DE': 'EUR',
+    'IT': 'EUR',
+    'NL': 'EUR',
+  };
+  String? _selectedCompetitor;
+  String? _selectedCountry;
+
   @override
   void initState() {
     super.initState();
@@ -122,8 +137,6 @@ class CameraScreenState extends State<CameraScreen> {
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
     ]);
     _controller?.dispose();
     super.dispose();
@@ -147,28 +160,27 @@ class CameraScreenState extends State<CameraScreen> {
       ResolutionPreset.high,
       enableAudio: false,
     );
-    
+
     _initializeControllerFuture = _controller!.initialize().then((_) async {
       if (!mounted) return;
-      
+
       _minZoomLevel = await _controller!.getMinZoomLevel();
       _maxZoomLevel = await _controller!.getMaxZoomLevel();
-      
+
       setState(() {});
     });
   }
 
   Future<XFile> _getSimulatorImage() async {
-    // Copy asset image to temporary directory
     final ByteData data = await rootBundle.load('assets/images/sample_document.png');
     final String path = join(
       (await getTemporaryDirectory()).path,
       'sample_document.png',
     );
-    
+
     final File file = File(path);
     await file.writeAsBytes(data.buffer.asUint8List());
-    
+
     return XFile(path);
   }
 
@@ -178,36 +190,63 @@ class CameraScreenState extends State<CameraScreen> {
         final XFile mockImage = await _getSimulatorImage();
         if (!mounted) return;
 
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => PreviewScreen(
-              image: mockImage,
-            ),
-          ),
-        );
+        await _sendData(mockImage);
         return;
       }
 
       await _initializeControllerFuture;
       final image = await _controller!.takePicture();
-      
+
       if (!mounted) return;
 
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => PreviewScreen(
-            image: image,
-          ),
-        ),
-      );
+      await _sendData(image);
     } catch (e) {
       print(e);
     }
   }
 
+  Future<void> _sendData(XFile image) async {
+    final String userId = ModalRoute.of(context)?.settings.arguments as String;
+    final bytes = await image.readAsBytes();
+    final String base64Image = base64Encode(bytes);
+
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final String? currency = _countryCurrency[_selectedCountry];
+    final Map<String, dynamic> data = {
+      'uploadedAt': $timestamp,
+      'agent_id': userId,
+      'agent_account_name': 'locutor es 1',
+      'competitor': _selectedCompetitor,
+      'send_country': _selectedCountry,
+      'send_currency': currency,
+      'base64Image': base64Image
+    };
+
+    final response = await http.put(
+      Uri.parse('https://kvdb.io/WkFjge45cAR9LKcWyrhAS4/$timestamp'),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(data),
+    );
+
+    if (response.statusCode == 200) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => PreviewScreen(
+            image: image,
+            key: timestamp, // Pass the key to the next screen
+          ),
+        ),
+      );
+    } else {
+      print('Failed in upstream..');
+    }
+  }
+
   Future<void> _setZoomLevel(double value) async {
     if (_isSimulator) return;
-    
+
     setState(() {
       _currentZoomLevel = value;
     });
@@ -247,7 +286,7 @@ class CameraScreenState extends State<CameraScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Camera Screen'),
+        title: Text(''),
         leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -374,6 +413,47 @@ class CameraScreenState extends State<CameraScreen> {
                     fontSize: 10,
                   ),
                 ),
+              ),
+            ),
+
+            // Dropdowns
+            Positioned(
+              top: (screenSize.height - cameraHeight) / 2 - 80,
+              left: 16,
+              child: Row(
+                children: [
+                  DropdownButton<String>(
+                    hint: Text('Competitor'),
+                    value: _selectedCompetitor,
+                    items: _competitors.map((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        _selectedCompetitor = newValue;
+                      });
+                    },
+                  ),
+                  SizedBox(width: 16),
+                  DropdownButton<String>(
+                    hint: Text('Country'),
+                    value: _selectedCountry,
+                    items: _countries.map((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        _selectedCountry = newValue;
+                      });
+                    },
+                  ),
+                ],
               ),
             ),
           ],
