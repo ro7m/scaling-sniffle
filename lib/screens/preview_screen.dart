@@ -7,9 +7,9 @@ import 'package:path_provider/path_provider.dart';
 
 class PreviewScreen extends StatefulWidget {
   final XFile image;
-  final Key? msgkey;
+  final String? msgkey;
 
-  const PreviewScreen({Key? key, required this.image, required this.msgkey}) : super(key: key);
+  const PreviewScreen({String? key, required this.image, required this.msgkey}) : super(key: key);
 
   @override
   _PreviewScreenState createState() => _PreviewScreenState();
