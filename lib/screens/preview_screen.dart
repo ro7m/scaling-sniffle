@@ -27,7 +27,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   Future<Map<String, dynamic>> _fetchData() async {
     await Future.delayed(const Duration(seconds: 20)); // Wait for processing
     final response = await http.get(
-      Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/${widget.key}'),
+      Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/$msgkey'),
     );
 
     if (response.statusCode == 200) {
