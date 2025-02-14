@@ -9,7 +9,7 @@ class PreviewScreen extends StatefulWidget {
   final XFile image;
   final String? msgkey;
 
-  const PreviewScreen({String? key, required this.image, required this.msgkey}) : super(key: key);
+  const PreviewScreen({Key? key, required this.image, required this.msgkey}) : super(key: key);
 
   @override
   _PreviewScreenState createState() => _PreviewScreenState();
