@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 class PreviewScreen extends StatefulWidget {
-  final XFile image;
   final String? msgkey;
 
-  const PreviewScreen({Key? key, required this.image, required this.msgkey}) : super(key: key);
+  const PreviewScreen({Key? key, required this.msgkey}) : super(key: key);
 
   @override
   _PreviewScreenState createState() => _PreviewScreenState();
@@ -25,15 +23,21 @@ class _PreviewScreenState extends State<PreviewScreen> {
   }
 
   Future<Map<String, dynamic>> _fetchData() async {
-    await Future.delayed(const Duration(seconds: 20)); // Wait for processing
-    final response = await http.get(
-      Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/${widget.msgkey}'),
-    );
+    try {
+      await Future.delayed(const Duration(seconds: 20)); // Wait for processing
+      final response = await http.get(
+        Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/${widget.msgkey}'),
+      );
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to read data for key : ${widget.msgkey}');
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to read data from upstream');
+      }
+    } catch (e) {
+      print('Exception occurred while fetching data for msgkey: ${widget.msgkey}');
+      print(e);
+      rethrow;
     }
   }
 
@@ -79,7 +83,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
           final data = snapshot.data!;
           return Column(
             children: [
-              Image.file(File(widget.image.path)),
               Expanded(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -102,9 +105,12 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   ),
                 ),
               ),
-              ElevatedButton(
-                onPressed: () => _downloadCsv(data),
-                child: Text('Download as CSV'),
+              SizedBox(
+                height: 50.0,
+                child: ElevatedButton(
+                  onPressed: () => _downloadCsv(data),
+                  child: Text('Download as CSV'),
+                ),
               ),
             ],
           );
