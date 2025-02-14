@@ -235,7 +235,7 @@ class CameraScreenState extends State<CameraScreen> {
         MaterialPageRoute(
           builder: (context) => PreviewScreen(
             image: image,
-            key: timestamp, // Pass the key to the next screen
+            msgkey: timestamp, // Pass the key to the next screen
           ),
         ),
       );
