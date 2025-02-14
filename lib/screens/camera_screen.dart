@@ -213,7 +213,7 @@ class CameraScreenState extends State<CameraScreen> {
     final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
     final String? currency = _countryCurrency[_selectedCountry];
     final Map<String, dynamic> data = {
-      'uploadedAt': $timestamp,
+      'uploadedAt': timestamp,
       'agent_id': userId,
       'agent_account_name': 'locutor es 1',
       'competitor': _selectedCompetitor,
