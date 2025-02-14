@@ -234,7 +234,6 @@ class CameraScreenState extends State<CameraScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => PreviewScreen(
-            image: image,
             msgkey: timestamp, // Pass the key to the next screen
           ),
         ),
