@@ -190,7 +190,7 @@ class CameraScreenState extends State<CameraScreen> {
         final XFile mockImage = await _getSimulatorImage();
         if (!mounted) return;
 
-        await _sendData(mockImage);
+        _sendData(mockImage);
         return;
       }
 
@@ -199,13 +199,13 @@ class CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
 
-      await _sendData(image);
+      _sendData(image);
     } catch (e) {
       print(e);
     }
   }
 
-  Future<void> _sendData(XFile image) async {
+  void _sendData(XFile image) async {
     final String userId = ModalRoute.of(context)?.settings.arguments as String;
     final bytes = await image.readAsBytes();
     final String base64Image = base64Encode(bytes);
@@ -231,7 +231,7 @@ class CameraScreenState extends State<CameraScreen> {
     );
 
     if (response.statusCode == 200) {
-      await Navigator.of(context).push(
+      Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => PreviewScreen(
             image: image,
@@ -295,6 +295,39 @@ class CameraScreenState extends State<CameraScreen> {
             Text(userId),
           ],
         ),
+        actions: [
+          DropdownButton<String>(
+            hint: Text('Competitor'),
+            value: _selectedCompetitor,
+            items: _competitors.map((String value) {
+              return DropdownMenuItem<String>(
+                value: value,
+                child: Text(value),
+              );
+            }).toList(),
+            onChanged: (String? newValue) {
+              setState(() {
+                _selectedCompetitor = newValue;
+              });
+            },
+          ),
+          SizedBox(width: 16),
+          DropdownButton<String>(
+            hint: Text('Country'),
+            value: _selectedCountry,
+            items: _countries.map((String value) {
+              return DropdownMenuItem<String>(
+                value: value,
+                child: Text(value),
+              );
+            }).toList(),
+            onChanged: (String? newValue) {
+              setState(() {
+                _selectedCountry = newValue;
+              });
+            },
+          ),
+        ],
       ),
       backgroundColor: Colors.black,
       body: Center(
@@ -413,47 +446,6 @@ class CameraScreenState extends State<CameraScreen> {
                     fontSize: 10,
                   ),
                 ),
-              ),
-            ),
-
-            // Dropdowns
-            Positioned(
-              top: (screenSize.height - cameraHeight) / 2 - 80,
-              left: 16,
-              child: Row(
-                children: [
-                  DropdownButton<String>(
-                    hint: Text('Competitor'),
-                    value: _selectedCompetitor,
-                    items: _competitors.map((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      setState(() {
-                        _selectedCompetitor = newValue;
-                      });
-                    },
-                  ),
-                  SizedBox(width: 16),
-                  DropdownButton<String>(
-                    hint: Text('Country'),
-                    value: _selectedCountry,
-                    items: _countries.map((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      setState(() {
-                        _selectedCountry = newValue;
-                      });
-                    },
-                  ),
-                ],
               ),
             ),
           ],
