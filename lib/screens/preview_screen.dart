@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:external_path/external_path.dart';
 
 class PreviewScreen extends StatefulWidget {
   final String? msgkey;
@@ -24,8 +26,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   Future<Map<String, dynamic>> _fetchData() async {
     try {
-      // Show spinner and message while processing data
-      await Future.delayed(const Duration(seconds: 25)); // added delay
+      await Future.delayed(const Duration(seconds: 25));
       final response = await http.get(
         Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/${widget.msgkey}'),
       );
@@ -42,51 +43,113 @@ class _PreviewScreenState extends State<PreviewScreen> {
     }
   }
 
-  Future<void> _downloadCsv(Map<String, dynamic> data) async {
-    final flattenedData = _flattenJson(data);
-    final keys = flattenedData.keys.toList();
-    final values = keys.map((key) => flattenedData[key]).toList();
-
-    final String csvData = '${keys.join(',')}\n${values.join(',')}';
-    final directory = await getDownloadsDirectory();
-    final path = '${directory!.path}/data.csv';
-    final File file = File(path);
-    await file.writeAsString(csvData);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('CSV downloaded to $path')),
-    );
-  }
-
-  Map<String, dynamic> _flattenJson(Map<String, dynamic> json) {
-    Map<String, dynamic> flattened = {};
-
-    void _extract(String prefix, dynamic value) {
-      if (value is Map<String, dynamic>) {
-        value.forEach((key, val) {
-          _extract('$prefix.$key', val);
-        });
-      } else if (value is List) {
-        for (int i = 0; i < value.length; i++) {
-          _extract('$prefix[$i]', value[i]);
-        }
-      } else {
-        flattened[prefix] = value.toString();
-      }
+  List<String> _getColumns(Map<String, dynamic> data) {
+    if (data['Processed_data'] == null || 
+        data['Processed_data'].isEmpty ||
+        !(data['Processed_data'] is List)) {
+      return [];
     }
 
-    json.forEach((key, value) {
-      _extract(key, value);
-    });
+    Set<String> columns = {'Key'};
+    for (var item in data['Processed_data']) {
+      if (item is Map<String, dynamic>) {
+        columns.addAll(item.keys);
+      }
+    }
+    return columns.toList();
+  }
 
-    return flattened;
+  List<Map<String, String>> _getRows(Map<String, dynamic> data) {
+    if (data['Processed_data'] == null || 
+        data['Processed_data'].isEmpty ||
+        !(data['Processed_data'] is List)) {
+      return [];
+    }
+
+    List<Map<String, String>> rows = [];
+    final uploadedAt = data['Key']?.toString() ?? '';
+    
+    for (var item in data['Processed_data']) {
+      if (item is Map<String, dynamic>) {
+        Map<String, String> row = {'Key': uploadedAt};
+        item.forEach((key, value) {
+          row[key] = value?.toString() ?? '';
+        });
+        rows.add(row);
+      }
+    }
+    return rows;
+  }
+
+  Future<void> _downloadCsv(Map<String, dynamic> data) async {
+    try {
+      // Request storage permission
+      var status = await Permission.storage.request();
+      if (!status.isGranted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Storage permission is required to download the file')),
+        );
+        return;
+      }
+
+      final columns = _getColumns(data);
+      final rows = _getRows(data);
+      
+      if (columns.isEmpty || rows.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data to export')),
+        );
+        return;
+      }
+
+      final csvHeader = columns.join(',');
+      final csvRows = rows.map((row) {
+        return columns.map((col) => '"${row[col] ?? ''}"').join(',');
+      }).join('\n');
+
+      final csvContent = '$csvHeader\n$csvRows';
+      
+      // Get the download directory path based on platform
+      String? downloadPath;
+      if (Platform.isAndroid) {
+        downloadPath = await ExternalPath.getExternalStoragePublicDirectory(
+          ExternalPath.DIRECTORY_DOWNLOADS
+        );
+      } else if (Platform.isIOS) {
+        final directory = await getApplicationDocumentsDirectory();
+        downloadPath = directory.path;
+      }
+
+      if (downloadPath == null) {
+        throw Exception('Could not determine download path');
+      }
+
+      // Use msgkey in filename
+      final filename = 'data_${widget.msgkey}.csv';
+      final path = '$downloadPath/$filename';
+      
+      final File file = File(path);
+      await file.writeAsString(csvContent);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('CSV downloaded to: $path'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      print('Error downloading CSV: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error downloading CSV: $e')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(''),
+        title: const Text('Data Preview'),
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _futureData,
@@ -105,13 +168,16 @@ class _PreviewScreenState extends State<PreviewScreen> {
           } else if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           } else if (!snapshot.hasData || snapshot.data == null) {
-            return Center(child: Text('No data found'));
+            return const Center(child: Text('No data found'));
           }
 
           final data = snapshot.data!;
-          final flattenedData = _flattenJson(data);
-          final keys = flattenedData.keys.toList();
-          final values = [flattenedData.values.toList()];
+          final columns = _getColumns(data);
+          final rows = _getRows(data);
+
+          if (columns.isEmpty || rows.isEmpty) {
+            return const Center(child: Text('No data available'));
+          }
 
           return Column(
             children: [
@@ -126,10 +192,14 @@ class _PreviewScreenState extends State<PreviewScreen> {
                           fontWeight: FontWeight.bold,
                           color: Colors.blue,
                         ),
-                        columns: keys.map((key) => DataColumn(label: Text(key))).toList(),
-                        rows: values.map((row) {
+                        columns: columns
+                            .map((col) => DataColumn(label: Text(col)))
+                            .toList(),
+                        rows: rows.map((row) {
                           return DataRow(
-                            cells: row.map((value) => DataCell(Text(value.toString()))).toList(),
+                            cells: columns
+                                .map((col) => DataCell(Text(row[col] ?? '')))
+                                .toList(),
                           );
                         }).toList(),
                       ),
@@ -137,11 +207,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   ),
                 ),
               ),
-              SizedBox(
-                height: 50.0,
-                child: ElevatedButton(
-                  onPressed: () => _downloadCsv(data),
-                  child: Text('Download as CSV'),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 50.0,
+                  child: ElevatedButton(
+                    onPressed: () => _downloadCsv(data),
+                    child: const Text('Download as CSV'),
+                  ),
                 ),
               ),
             ],
