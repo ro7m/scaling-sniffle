@@ -86,7 +86,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Extracted Data'),
+        title: Text(''),
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _futureData,

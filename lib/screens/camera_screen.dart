@@ -185,16 +185,18 @@ class CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _takePicture() async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+
     try {
       if (_isSimulator) {
         final XFile mockImage = await _getSimulatorImage();
         if (!mounted) return;
 
-        _sendDataInBackground(mockImage);
+        _sendDataInBackground(mockImage,timestamp);
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) => PreviewScreen(
-              msgkey: '', // Pass an empty key initially
+              msgkey: timestamp, // Pass an empty key initially
             ),
           ),
         );
@@ -206,11 +208,11 @@ class CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
 
-      _sendDataInBackground(image);
+      _sendDataInBackground(image,timestamp);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (context) => PreviewScreen(
-            msgkey: '', // Pass an empty key initially
+            msgkey: timestamp, // Pass an empty key initially
           ),
         ),
       );
@@ -219,12 +221,10 @@ class CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  void _sendDataInBackground(XFile image) async {
+  void _sendDataInBackground(XFile image, String timestamp) async {
     final String userId = ModalRoute.of(context)?.settings.arguments as String;
     final bytes = await image.readAsBytes();
     final String base64Image = base64Encode(bytes);
-
-    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
     final String? currency = _countryCurrency[_selectedCountry];
     final Map<String, dynamic> data = {
       'uploadedAt': timestamp,
