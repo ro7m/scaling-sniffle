@@ -190,7 +190,14 @@ class CameraScreenState extends State<CameraScreen> {
         final XFile mockImage = await _getSimulatorImage();
         if (!mounted) return;
 
-        _sendData(mockImage);
+        _sendDataInBackground(mockImage);
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => PreviewScreen(
+              msgkey: '', // Pass an empty key initially
+            ),
+          ),
+        );
         return;
       }
 
@@ -199,13 +206,20 @@ class CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
 
-      _sendData(image);
+      _sendDataInBackground(image);
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => PreviewScreen(
+            msgkey: '', // Pass an empty key initially
+          ),
+        ),
+      );
     } catch (e) {
       print(e);
     }
   }
 
-  void _sendData(XFile image) async {
+  void _sendDataInBackground(XFile image) async {
     final String userId = ModalRoute.of(context)?.settings.arguments as String;
     final bytes = await image.readAsBytes();
     final String base64Image = base64Encode(bytes);
@@ -231,10 +245,11 @@ class CameraScreenState extends State<CameraScreen> {
     );
 
     if (response.statusCode == 200) {
-      Navigator.of(context).push(
+      // Update the key in the PreviewScreen once the data is sent successfully
+      Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (context) => PreviewScreen(
-            msgkey: timestamp, // Pass the key to the next screen
+            msgkey: timestamp, // Pass the actual key
           ),
         ),
       );

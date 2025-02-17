@@ -19,12 +19,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
   @override
   void initState() {
     super.initState();
-    _futureData = _fetchData();
+    if (widget.msgkey != '') {
+      _futureData = _fetchData();
+    } else {
+      _futureData = Future.value({});
+    }
   }
 
   Future<Map<String, dynamic>> _fetchData() async {
     try {
-      await Future.delayed(const Duration(seconds: 20)); // Wait for processing
       final response = await http.get(
         Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/${widget.msgkey}'),
       );
@@ -42,18 +45,43 @@ class _PreviewScreenState extends State<PreviewScreen> {
   }
 
   Future<void> _downloadCsv(Map<String, dynamic> data) async {
-    final keys = data.keys.toList();
-    final values = keys.map((key) => data[key]).toList();
+    final flattenedData = _flattenJson(data);
+    final keys = flattenedData.keys.toList();
+    final values = keys.map((key) => flattenedData[key]).toList();
 
     final String csvData = '${keys.join(',')}\n${values.join(',')}';
-    final directory = await getApplicationDocumentsDirectory();
-    final path = '${directory.path}/data.csv';
+    final directory = await getDownloadsDirectory();
+    final path = '${directory!.path}/data.csv';
     final File file = File(path);
     await file.writeAsString(csvData);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('CSV downloaded to $path')),
     );
+  }
+
+  Map<String, dynamic> _flattenJson(Map<String, dynamic> json) {
+    Map<String, dynamic> flattened = {};
+
+    void _extract(String prefix, dynamic value) {
+      if (value is Map<String, dynamic>) {
+        value.forEach((key, val) {
+          _extract('$prefix.$key', val);
+        });
+      } else if (value is List) {
+        for (int i = 0; i < value.length; i++) {
+          _extract('$prefix[$i]', value[i]);
+        }
+      } else {
+        flattened[prefix] = value.toString();
+      }
+    }
+
+    json.forEach((key, value) {
+      _extract(key, value);
+    });
+
+    return flattened;
   }
 
   @override
@@ -81,6 +109,10 @@ class _PreviewScreenState extends State<PreviewScreen> {
           }
 
           final data = snapshot.data!;
+          final flattenedData = _flattenJson(data);
+          final keys = flattenedData.keys.toList();
+          final values = [flattenedData.values.toList()];
+
           return Column(
             children: [
               Expanded(
@@ -94,12 +126,12 @@ class _PreviewScreenState extends State<PreviewScreen> {
                           fontWeight: FontWeight.bold,
                           color: Colors.blue,
                         ),
-                        columns: data.keys.map((key) => DataColumn(label: Text(key))).toList(),
-                        rows: [
-                          DataRow(
-                            cells: data.values.map((value) => DataCell(Text(value.toString()))).toList(),
-                          ),
-                        ],
+                        columns: keys.map((key) => DataColumn(label: Text(key))).toList(),
+                        rows: values.map((row) {
+                          return DataRow(
+                            cells: row.map((value) => DataCell(Text(value.toString()))).toList(),
+                          );
+                        }).toList(),
                       ),
                     ),
                   ),
