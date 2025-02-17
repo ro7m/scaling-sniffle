@@ -19,15 +19,13 @@ class _PreviewScreenState extends State<PreviewScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.msgkey != '') {
-      _futureData = _fetchData();
-    } else {
-      _futureData = Future.value({});
-    }
+    _futureData = _fetchData();
   }
 
   Future<Map<String, dynamic>> _fetchData() async {
     try {
+      // Show spinner and message while processing data
+      await Future.delayed(const Duration(seconds: 25)); // added delay
       final response = await http.get(
         Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/${widget.msgkey}'),
       );
@@ -94,14 +92,16 @@ class _PreviewScreenState extends State<PreviewScreen> {
         future: _futureData,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
-                CircularProgressIndicator(),
-                SizedBox(height: 20),
-                Text('Fetching processed data...')
-              ],
-            ));
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 20),
+                  Text('Processing the data now...'),
+                ],
+              ),
+            );
           } else if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           } else if (!snapshot.hasData || snapshot.data == null) {
