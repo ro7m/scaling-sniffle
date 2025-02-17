@@ -44,7 +44,6 @@ dependencies:
   json_table: ^2.0.1
   http: ^1.2.2
   device_info_plus: ^11.2.0
-  external_path: ^1.0.3
 
 
 dev_dependencies:
