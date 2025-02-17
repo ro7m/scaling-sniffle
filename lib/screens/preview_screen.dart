@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:external_path/external_path.dart';
 
 class PreviewScreen extends StatefulWidget {
   final String? msgkey;
@@ -22,6 +21,33 @@ class _PreviewScreenState extends State<PreviewScreen> {
   void initState() {
     super.initState();
     _futureData = _fetchData();
+  }
+
+  Future<String?> _getDownloadPath() async {
+    Directory? directory;
+    try {
+      if (Platform.isAndroid) {
+        directory = await getExternalStorageDirectory();
+        String newPath = "";
+        List<String> paths = directory!.path.split("/");
+        for (int x = 1; x < paths.length; x++) {
+          String folder = paths[x];
+          if (folder != "Android") {
+            newPath += "/" + folder;
+          } else {
+            break;
+          }
+        }
+        newPath = newPath + "/Download";
+        directory = Directory(newPath);
+      } else if (Platform.isIOS) {
+        directory = await getApplicationDocumentsDirectory();
+      }
+      return directory?.path;
+    } catch (e) {
+      print("Error getting download path: $e");
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>> _fetchData() async {
@@ -67,11 +93,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
     }
 
     List<Map<String, String>> rows = [];
-    final uploadedAt = data['Key']?.toString() ?? '';
+    final key = data['Key']?.toString() ?? '';
     
     for (var item in data['Processed_data']) {
       if (item is Map<String, dynamic>) {
-        Map<String, String> row = {'Key': uploadedAt};
+        Map<String, String> row = {'Key': key};
         item.forEach((key, value) {
           row[key] = value?.toString() ?? '';
         });
@@ -83,7 +109,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   Future<void> _downloadCsv(Map<String, dynamic> data) async {
     try {
-      // Request storage permission
       var status = await Permission.storage.request();
       if (!status.isGranted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -109,22 +134,17 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
       final csvContent = '$csvHeader\n$csvRows';
       
-      // Get the download directory path based on platform
-      String? downloadPath;
-      if (Platform.isAndroid) {
-        downloadPath = await ExternalPath.getExternalStoragePublicDirectory(
-          ExternalPath.DIRECTORY_DOWNLOADS
-        );
-      } else if (Platform.isIOS) {
-        final directory = await getApplicationDocumentsDirectory();
-        downloadPath = directory.path;
-      }
-
+      String? downloadPath = await _getDownloadPath();
+      
       if (downloadPath == null) {
         throw Exception('Could not determine download path');
       }
 
-      // Use msgkey in filename
+      final dir = Directory(downloadPath);
+      if (!dir.existsSync()) {
+        dir.createSync(recursive: true);
+      }
+
       final filename = 'data_${widget.msgkey}.csv';
       final path = '$downloadPath/$filename';
       
@@ -176,7 +196,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
           final rows = _getRows(data);
 
           if (columns.isEmpty || rows.isEmpty) {
-            return const Center(child: Text('No data available'));
+            return const Center(child: Text('No processed data available'));
           }
 
           return Column(
