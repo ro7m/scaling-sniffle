@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 class PreviewScreen extends StatefulWidget {
   final String? msgkey;
@@ -21,29 +22,76 @@ class _PreviewScreenState extends State<PreviewScreen> {
   void initState() {
     super.initState();
     _futureData = _fetchData();
+    _checkPermissions();
+  }
+
+  Future<void> _checkPermissions() async {
+    if (Platform.isAndroid) {
+      if (await _isAndroid11OrHigher()) {
+        final status = await Permission.manageExternalStorage.status;
+        if (status.isDenied) {
+          await Permission.manageExternalStorage.request();
+        }
+      } else {
+        final status = await Permission.storage.status;
+        if (status.isDenied) {
+          await Permission.storage.request();
+        }
+      }
+    }
+  }
+
+  Future<bool> _isAndroid11OrHigher() async {
+    if (Platform.isAndroid) {
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      return androidInfo.version.sdkInt >= 30;
+    }
+    return false;
+  }
+
+  Future<bool> _requestPermission() async {
+    if (Platform.isAndroid) {
+      if (await _isAndroid11OrHigher()) {
+        final status = await Permission.manageExternalStorage.request();
+        return status.isGranted;
+      } else {
+        final status = await Permission.storage.request();
+        return status.isGranted;
+      }
+    }
+    return true; // For iOS or other platforms
   }
 
   Future<String?> _getDownloadPath() async {
     Directory? directory;
     try {
       if (Platform.isAndroid) {
-        directory = await getExternalStorageDirectory();
-        String newPath = "";
-        List<String> paths = directory!.path.split("/");
-        for (int x = 1; x < paths.length; x++) {
-          String folder = paths[x];
-          if (folder != "Android") {
-            newPath += "/" + folder;
-          } else {
-            break;
+        if (await _isAndroid11OrHigher()) {
+          directory = Directory('/storage/emulated/0/Download');
+        } else {
+          directory = await getExternalStorageDirectory();
+          String newPath = "";
+          List<String> paths = directory!.path.split("/");
+          for (int x = 1; x < paths.length; x++) {
+            String folder = paths[x];
+            if (folder != "Android") {
+              newPath += "/" + folder;
+            } else {
+              break;
+            }
           }
+          newPath = newPath + "/Download";
+          directory = Directory(newPath);
         }
-        newPath = newPath + "/Download";
-        directory = Directory(newPath);
       } else if (Platform.isIOS) {
         directory = await getApplicationDocumentsDirectory();
       }
-      return directory?.path;
+      
+      if (!directory!.existsSync()) {
+        directory.createSync(recursive: true);
+      }
+      
+      return directory.path;
     } catch (e) {
       print("Error getting download path: $e");
       return null;
@@ -109,11 +157,17 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   Future<void> _downloadCsv(Map<String, dynamic> data) async {
     try {
-      var status = await Permission.storage.request();
-      if (!status.isGranted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Storage permission is required to download the file')),
-        );
+      final bool isPermissionGranted = await _requestPermission();
+      
+      if (!isPermissionGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Storage permission is required to download the file. Please grant permission in settings.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
         return;
       }
 
@@ -121,9 +175,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
       final rows = _getRows(data);
       
       if (columns.isEmpty || rows.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No data to export')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No data to export')),
+          );
+        }
         return;
       }
 
@@ -140,28 +196,27 @@ class _PreviewScreenState extends State<PreviewScreen> {
         throw Exception('Could not determine download path');
       }
 
-      final dir = Directory(downloadPath);
-      if (!dir.existsSync()) {
-        dir.createSync(recursive: true);
-      }
-
-      final filename = 'data_${widget.msgkey}.csv';
+      final filename = 'data_${DateTime.now().millisecondsSinceEpoch}_${widget.msgkey}.csv';
       final path = '$downloadPath/$filename';
       
       final File file = File(path);
       await file.writeAsString(csvContent);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('CSV downloaded to: $path'),
-          duration: const Duration(seconds: 5),
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('CSV downloaded to: $path'),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     } catch (e) {
       print('Error downloading CSV: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error downloading CSV: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error downloading CSV: $e')),
+        );
+      }
     }
   }
 
