@@ -11,25 +11,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the code
       - uses: actions/checkout@v3
 
-      # Step 2: Set up Java (using Java 11, as Android Gradle Plugin 8+ is compatible with Java 11+)
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      # Step 3: Set up the Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # Step 4: Set up Gradle
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
 
-      # Step 5: Set up Flutter
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -37,35 +32,42 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # Step 6: Create local.properties
+      # Decode Keystore with simplified secrets
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" > keystore.b64
+          base64 -d keystore.b64 > android/app/upload-keystore.jks
+
+      # Create key.properties with same password for both
+      - name: Create key.properties
+        run: |
+          echo "storeFile=upload-keystore.jks" > android/key.properties
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" >> android/key.properties
+          echo "keyPassword=${{ secrets.KEYSTORE_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
+
       - name: Create local.properties
         run: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
           echo "flutter.sdk=$FLUTTER_HOME" >> android/local.properties
 
-      # Step 7: Ensure Gradlew is executable
       - name: Make Gradlew Executable
         run: chmod +x android/gradlew
 
-      # Step 8: Add AndroidX properties to gradle.properties
       - name: Ensure AndroidX is enabled
         run: |
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
 
-      # Step 9: Get Flutter dependencies
       - name: Get dependencies
         run: flutter pub get
 
-      # Step 10: Clean Gradle cache
       - name: Clean Gradle
         run: cd android && ./gradlew clean
 
-      # Step 11: Build the release APK
       - name: Build APK
         run: flutter build apk --release
 
-      # Step 12: Upload APK as artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
