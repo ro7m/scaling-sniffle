@@ -100,7 +100,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   Future<Map<String, dynamic>> _fetchData() async {
     try {
-      await Future.delayed(const Duration(seconds: 25));
+      await Future.delayed(const Duration(seconds: 50));
       final response = await http.get(
         Uri.parse('https://kvdb.io/VuKUzo8aFSpoWpyXKpFxxH/${widget.msgkey}'),
       );
